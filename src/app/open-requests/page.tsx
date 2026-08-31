@@ -1,0 +1,370 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useAuth } from "@/hooks/useAuth";
+import { useRoleTheme } from "@/hooks/useRoleTheme";
+import {
+  getOpenRequestsPublicPreview,
+  getOpenRequestsForInstructor,
+  getMyMatchingProfile,
+  markResultsSeenByInstructor,
+} from "@/services/requests";
+import { getRequesterContacts } from "@/services/profiles";
+import type { OpenRequestPublicPreviewRow, TrainingRequestRow, InstructorResponseRow, TrainingReviewRow } from "@/types/database";
+
+const FORMAT_LABEL: Record<string, string> = { online: "オンライン", offline: "対面", both: "オンライン・対面" };
+const HIDDEN_KEY = "kenshulink_hidden_open_requests";
+
+type RequestWithJoins = TrainingRequestRow & {
+  instructor_responses: InstructorResponseRow[];
+  training_reviews: TrainingReviewRow[];
+  myResponse: InstructorResponseRow | null;
+};
+
+function fmtDate(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function getHiddenIds(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]") || [];
+  } catch {
+    return [];
+  }
+}
+
+function matchReasons(
+  r: RequestWithJoins,
+  myProfile: { workStyle: string | null; desiredRateMin: number | null; expertiseIds: Set<string> } | null
+) {
+  if (!myProfile) return [];
+  const reasons: string[] = [];
+  if (r.expertise_field && myProfile.expertiseIds.has(r.expertise_field)) reasons.push("分野");
+  const formatOk =
+    r.preferred_format === "both" ||
+    (r.preferred_format === "online" && (myProfile.workStyle === "ONLINE" || myProfile.workStyle === "HYBRID")) ||
+    (r.preferred_format === "offline" && (myProfile.workStyle === "ONSITE" || myProfile.workStyle === "HYBRID"));
+  if (formatOk) reasons.push("形態");
+  if (r.budget != null && myProfile.desiredRateMin != null && r.budget >= myProfile.desiredRateMin) reasons.push("予算");
+  return reasons;
+}
+function isRecommended(reasons: string[]) {
+  return reasons.includes("分野") || reasons.length >= 2;
+}
+
+function displayStatus(r: RequestWithJoins) {
+  if (r.status === "completed") return { key: "completed", label: "完了" };
+  if (r.status === "accepted") {
+    return r.myResponse?.is_selected ? { key: "selected", label: "あなたに決定" } : { key: "not-selected", label: "応募終了" };
+  }
+  if (r.myResponse) {
+    if (r.myResponse.action === "reject" || r.myResponse.action === "withdrawn") return { key: "rejected", label: "却下済み" };
+    return { key: "quoted", label: "返信済み（依頼者の確定待ち）" };
+  }
+  return { key: "pending", label: "募集中" };
+}
+
+function badgeClass(key: string) {
+  if (key === "quoted") return "quoted";
+  if (key === "rejected" || key === "not-selected") return "rejected";
+  if (key === "selected") return "accepted";
+  return key;
+}
+
+function PublicPreviewList() {
+  const [requests, setRequests] = useState<OpenRequestPublicPreviewRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await getOpenRequestsPublicPreview();
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      setRequests(data || []);
+    })();
+  }, []);
+
+  return (
+    <>
+      <div className="mypage__head">
+        <h1 className="mypage__title">公募中の依頼</h1>
+        <p className="mypage__role">企業・個人から寄せられている依頼の一覧です（詳細の閲覧・応募には講師アカウントでのログインが必要です）</p>
+      </div>
+      {error && <p style={{ color: "var(--color-danger)", fontSize: 13 }}>読み込みエラー：{error}</p>}
+      {!error && !requests && <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>読み込み中…</p>}
+      {!error && requests && requests.length === 0 && (
+        <div className="empty-state">
+          <p className="empty-state__title">現在、公募中の依頼はありません</p>
+        </div>
+      )}
+      {requests?.map((r) => (
+        <div key={r.request_id} className="request-card">
+          <div className="request-card__top">
+            <div>
+              <div className="request-card__title">{r.title}</div>
+              <div className="request-card__meta">
+                <span>{r.requester_type === "company" ? "企業" : "生徒"}からの公募</span>
+                <span>{fmtDate(r.created_at)}</span>
+              </div>
+            </div>
+            <span className="status-badge status-badge--pending">募集中</span>
+          </div>
+          <p className="request-card__desc">{r.description}</p>
+          <div className="request-card__tags">
+            <span className="instructor-card__tag">{FORMAT_LABEL[r.preferred_format] || r.preferred_format}</span>
+            {r.budget ? <span className="instructor-card__tag">予算 ¥{Number(r.budget).toLocaleString()}</span> : null}
+            {r.location ? <span className="instructor-card__tag">{r.location}</span> : null}
+          </div>
+          <div className="request-card__actions">
+            <Link href={`/request-detail?id=${r.request_id}`} className="btn btn--primary btn--sm">
+              詳細を見る
+            </Link>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+export default function OpenRequestsPage() {
+  const { authReady, user } = useAuth();
+  useRoleTheme("instructor");
+  const [allRequests, setAllRequests] = useState<RequestWithJoins[]>([]);
+  const [requesterMap, setRequesterMap] = useState<
+    Record<string, { name?: string; email?: string; phone?: string | null; company_name?: string | null }>
+  >({});
+  const [myProfile, setMyProfile] = useState<{ workStyle: string | null; desiredRateMin: number | null; expertiseIds: Set<string> } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [currentTab, setCurrentTab] = useState<"recommended" | "open" | "mine">("recommended");
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user || user.role !== "INSTRUCTOR") {
+      return;
+    }
+    (async () => {
+      setHiddenIds(getHiddenIds());
+
+      const profile = await getMyMatchingProfile(user.id);
+      setMyProfile(profile);
+
+      const { data, error } = await getOpenRequestsForInstructor();
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
+
+      const rows = (data || []) as unknown as (TrainingRequestRow & {
+        instructor_responses: InstructorResponseRow[];
+        training_reviews: TrainingReviewRow[];
+      })[];
+      const withResponses: RequestWithJoins[] = rows.map((r) => ({
+        ...r,
+        myResponse: (r.instructor_responses || []).find((x) => x.instructor_id === user.id) || null,
+      }));
+      setAllRequests(withResponses);
+
+      const notSelectedResponseIds = withResponses
+        .filter((r) => r.status === "accepted" && r.myResponse && !r.myResponse.is_selected)
+        .map((r) => r.myResponse!.response_id);
+      await markResultsSeenByInstructor(notSelectedResponseIds);
+
+      const selectedRequesterIds = withResponses
+        .filter((r) => r.status === "accepted" && r.myResponse?.is_selected)
+        .map((r) => r.requester_id);
+      if (selectedRequesterIds.length) {
+        setRequesterMap(await getRequesterContacts(selectedRequesterIds));
+      }
+
+      setLoading(false);
+    })();
+  }, [authReady, user]);
+
+  const counts = useMemo(() => {
+    const open = allRequests.filter((r) => r.status === "pending" && !r.myResponse && !hiddenIds.includes(r.request_id));
+    const mine = allRequests.filter((r) => r.myResponse);
+    const recommended = open.filter((r) => matchReasons(r, myProfile).length > 0);
+    return { open: open.length, mine: mine.length, recommended: recommended.length };
+  }, [allRequests, hiddenIds, myProfile]);
+
+  const filtered = useMemo(() => {
+    if (currentTab === "recommended") {
+      return allRequests
+        .filter((r) => r.status === "pending" && !r.myResponse && !hiddenIds.includes(r.request_id) && matchReasons(r, myProfile).length > 0)
+        .sort((a, b) => {
+          const ra = matchReasons(a, myProfile);
+          const rb = matchReasons(b, myProfile);
+          const strongDiff = (isRecommended(rb) ? 1 : 0) - (isRecommended(ra) ? 1 : 0);
+          if (strongDiff !== 0) return strongDiff;
+          return rb.length - ra.length;
+        });
+    }
+    if (currentTab === "open") {
+      return allRequests.filter((r) => r.status === "pending" && !r.myResponse && !hiddenIds.includes(r.request_id));
+    }
+    return allRequests.filter((r) => r.myResponse);
+  }, [allRequests, currentTab, hiddenIds, myProfile]);
+
+  if (!authReady || (user && user.role === "INSTRUCTOR" && loading)) {
+    return (
+      <main className="mypage">
+        <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>読み込み中…</p>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="mypage">
+        <PublicPreviewList />
+      </main>
+    );
+  }
+
+  if (user.role !== "INSTRUCTOR") {
+    return (
+      <main className="mypage">
+        <div className="empty-state" style={{ paddingTop: 80 }}>
+          <p className="empty-state__title">講師アカウントのみご利用いただけます</p>
+          <p className="empty-state__desc">公募中の依頼への応募は、講師アカウントでログインした場合のみ利用できます。</p>
+          <Link href="/mypage" className="btn btn--primary" style={{ marginTop: 16 }}>
+            マイページに戻る
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mypage">
+      <div className="mypage__head">
+        <h1 className="mypage__title">公募中の依頼</h1>
+        <p className="mypage__role">特定の講師を指定せずに募集されている依頼の一覧です</p>
+      </div>
+
+      <div className="status-tabs">
+        {(
+          [
+            ["recommended", "あなたにおすすめ", counts.recommended],
+            ["open", "応募可能", counts.open],
+            ["mine", "応募済み", counts.mine],
+          ] as const
+        ).map(([key, label, count]) => (
+          <button
+            key={key}
+            type="button"
+            className={`status-tab${currentTab === key ? " is-active" : ""}`}
+            onClick={() => setCurrentTab(key)}
+          >
+            {label}
+            <span className="status-tab__count">({count})</span>
+          </button>
+        ))}
+      </div>
+
+      {error && <p style={{ color: "var(--color-danger)", fontSize: 13 }}>読み込みエラー：{error}</p>}
+
+      {!error && filtered.length === 0 && (
+        <div className="empty-state">
+          <p className="empty-state__title">
+            {currentTab === "recommended"
+              ? "現在、あなたにおすすめの案件はありません"
+              : currentTab === "open"
+                ? "現在、応募可能な公募依頼はありません"
+                : "まだ応募した公募依頼はありません"}
+          </p>
+        </div>
+      )}
+
+      {filtered.map((r) => {
+        const st = displayStatus(r);
+        const reasons = currentTab === "recommended" ? matchReasons(r, myProfile) : [];
+        const requester = requesterMap[r.requester_id];
+        return (
+          <div className="request-card" key={r.request_id}>
+            <div className="request-card__top">
+              <div>
+                <div className="request-card__title">{r.title}</div>
+                <div className="request-card__meta">
+                  <span>{r.requester_type === "company" ? "企業" : "生徒"}からの公募</span>
+                  <span>{fmtDate(r.created_at)}</span>
+                </div>
+              </div>
+              <span className={`status-badge status-badge--${badgeClass(st.key)}`}>{st.label}</span>
+            </div>
+
+            {reasons.length > 0 && (
+              <div
+                className={`notice-banner${isRecommended(reasons) ? " is-visible" : ""}`}
+                style={{ marginBottom: 10, fontSize: 12.5, ...(isRecommended(reasons) ? {} : { opacity: 0.65, background: "var(--color-bg)" }) }}
+              >
+                あなたの{reasons.join("・")}と合致しています
+              </div>
+            )}
+
+            <p className="request-card__desc">{r.description}</p>
+            <div className="request-card__tags">
+              <span className="instructor-card__tag">{FORMAT_LABEL[r.preferred_format] || r.preferred_format}</span>
+              {r.budget ? <span className="instructor-card__tag">予算 ¥{Number(r.budget).toLocaleString()}</span> : null}
+              {r.location ? <span className="instructor-card__tag">{r.location}</span> : null}
+              {r.preferred_schedule ? <span className="instructor-card__tag">{r.preferred_schedule}</span> : null}
+            </div>
+
+            {r.myResponse && (
+              <div className="request-card__response">
+                <strong>
+                  あなたの対応：
+                  {r.myResponse.action === "accept"
+                    ? "承諾"
+                    : r.myResponse.action === "quote"
+                      ? `見積り ¥${Number(r.myResponse.quote_price || 0).toLocaleString()}`
+                      : "却下"}
+                </strong>
+                {r.myResponse.message ? r.myResponse.message : "（メッセージなし）"}
+              </div>
+            )}
+
+            {!r.myResponse && r.status === "pending" && (
+              <div className="request-card__actions">
+                <Link href={`/request-detail?id=${r.request_id}&focus=respond`} className="btn btn--primary btn--sm">
+                  応募する
+                </Link>
+                <Link href={`/request-detail?id=${r.request_id}`} className="btn btn--ghost btn--sm">
+                  詳細を見る
+                </Link>
+              </div>
+            )}
+
+            {st.key === "selected" && (
+              <>
+                <div className="contact-box">
+                  <strong>連絡先：</strong>
+                  {requester ? (
+                    <>
+                      <div>{requester.company_name ? `会社名：${requester.company_name}` : `担当者：${requester.name}`}</div>
+                      <div>メール：{requester.email}</div>
+                      <div>電話番号：{requester.phone || "未登録"}</div>
+                    </>
+                  ) : (
+                    "読み込み中…"
+                  )}
+                </div>
+                <p className="request-card__desc" style={{ color: "var(--color-ink-soft)" }}>
+                  この依頼はあなたに決定しました。マイページの「受け取った依頼」からは表示されないため、進捗はこのページで確認してください。
+                </p>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </main>
+  );
+}

@@ -1,0 +1,499 @@
+"use client";
+
+import { Suspense, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/components/common/Toast";
+import { useRoleTheme } from "@/hooks/useRoleTheme";
+import {
+  getOpenRequestPublicDetail,
+  getTrainingRequestDetail,
+  getTrainingRequestWithResponses,
+  submitInstructorResponse,
+} from "@/services/requests";
+import { getRequesterContacts } from "@/services/profiles";
+import { getMatchingCandidateInstructors, getInstructorExpertiseInstructorIds } from "@/services/instructors";
+import type {
+  InstructorPublicDirectoryRow,
+  InstructorResponseRow,
+  OpenRequestPublicPreviewRow,
+  TrainingRequestRow,
+  TrainingReviewRow,
+} from "@/types/database";
+
+const FORMAT_LABEL: Record<string, string> = { online: "オンライン", offline: "対面", both: "オンライン・対面" };
+const HIDDEN_KEY = "kenshulink_hidden_open_requests";
+
+function fmtDate(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function Tags({ r }: { r: { preferred_format: string; budget: number | null; location: string | null; preferred_schedule: string | null } }) {
+  return (
+    <div className="request-card__tags" style={{ margin: "18px 0" }}>
+      <span className="instructor-card__tag">{FORMAT_LABEL[r.preferred_format] || r.preferred_format}</span>
+      {r.budget ? <span className="instructor-card__tag">予算 ¥{Number(r.budget).toLocaleString()}</span> : null}
+      {r.location ? <span className="instructor-card__tag">{r.location}</span> : null}
+      {r.preferred_schedule ? <span className="instructor-card__tag">{r.preferred_schedule}</span> : null}
+    </div>
+  );
+}
+
+function NotFoundBlock() {
+  return (
+    <div className="empty-state" style={{ paddingTop: 80 }}>
+      <p className="empty-state__title">依頼が見つかりませんでした</p>
+      <p className="empty-state__desc">削除されたか、公募が終了している可能性があります。</p>
+      <Link href="/open-requests" className="btn btn--primary" style={{ marginTop: 16 }}>
+        一覧に戻る
+      </Link>
+    </div>
+  );
+}
+
+function displayStatus(r: TrainingRequestRow, myResponse: InstructorResponseRow | null) {
+  if (r.status === "completed") return { key: "completed", label: "完了" };
+  if (r.status === "accepted") {
+    return myResponse?.is_selected ? { key: "selected", label: "あなたに決定" } : { key: "not-selected", label: "応募終了" };
+  }
+  if (myResponse) {
+    if (myResponse.action === "reject" || myResponse.action === "withdrawn") return { key: "rejected", label: "却下済み" };
+    return { key: "quoted", label: "返信済み（依頼者の確定待ち）" };
+  }
+  return { key: "pending", label: "募集中" };
+}
+function badgeClass(key: string) {
+  if (key === "quoted") return "quoted";
+  if (key === "rejected" || key === "not-selected") return "rejected";
+  if (key === "selected") return "accepted";
+  return key;
+}
+
+function PublicDetail({ requestId, onLoginGate }: { requestId: string; onLoginGate: () => void }) {
+  const [r, setR] = useState<OpenRequestPublicPreviewRow | null | undefined>(undefined);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await getOpenRequestPublicDetail(requestId);
+      setR(error || !data ? null : data);
+    })();
+  }, [requestId]);
+
+  if (r === undefined) return <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>読み込み中…</p>;
+  if (r === null) return <NotFoundBlock />;
+
+  return (
+    <>
+      <Link href="/open-requests" className="breadcrumb">
+        ← 一覧に戻る
+      </Link>
+      <div className="request-card">
+        <div className="request-card__top">
+          <div>
+            <div className="request-card__title" style={{ fontSize: 20 }}>
+              {r.title}
+            </div>
+            <div className="request-card__meta">
+              <span>{r.requester_type === "company" ? "企業" : "生徒"}からの公募</span>
+              <span>{fmtDate(r.created_at)}</span>
+            </div>
+          </div>
+          <span className="status-badge status-badge--pending">募集中</span>
+        </div>
+        <Tags r={r} />
+        <p className="request-card__desc" style={{ whiteSpace: "pre-wrap" }}>
+          {r.description}
+        </p>
+        <div className="request-card__actions" style={{ marginTop: 24 }}>
+          <button type="button" className="btn btn--primary" onClick={onLoginGate}>
+            ログインして応募する
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+type ReqWithJoins = TrainingRequestRow & { instructor_responses: InstructorResponseRow[]; training_reviews: TrainingReviewRow[] };
+
+function InstructorDetailView({ requestId, instructorId, focusRespond }: { requestId: string; instructorId: string; focusRespond: boolean }) {
+  const { showToast } = useToast();
+  const router = useRouter();
+  const [r, setR] = useState<ReqWithJoins | null | undefined>(undefined);
+  const [requesterInfo, setRequesterInfo] = useState<{ name?: string; email?: string; phone?: string | null; company_name?: string | null } | null>(null);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+  const [quotePrice, setQuotePrice] = useState("");
+  const [quoteMessage, setQuoteMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  async function load() {
+    const { data, error } = await getTrainingRequestDetail(requestId);
+    if (error || !data) {
+      setR(null);
+      return;
+    }
+    const row = data as unknown as ReqWithJoins;
+    setR(row);
+
+    const myResponse = (row.instructor_responses || []).find((x) => x.instructor_id === instructorId) || null;
+    const st = displayStatus(row, myResponse);
+    if (st.key === "selected") {
+      const map = await getRequesterContacts([row.requester_id]);
+      setRequesterInfo(map[row.requester_id] || null);
+    }
+  }
+
+  useEffect(() => {
+    (async () => {
+      await load();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestId]);
+
+  useEffect(() => {
+    if (focusRespond && r) {
+      actionsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [focusRespond, r]);
+
+  if (r === undefined) return <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>読み込み中…</p>;
+  if (r === null) return <NotFoundBlock />;
+
+  const myResponse = (r.instructor_responses || []).find((x) => x.instructor_id === instructorId) || null;
+  const st = displayStatus(r, myResponse);
+
+  function hideRequest() {
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]") || [];
+    } catch {
+      /* ignore */
+    }
+    if (!ids.includes(requestId)) ids.push(requestId);
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify(ids));
+  }
+
+  async function respond(action: "accept" | "reject") {
+    setBusy(true);
+    const { error } = await submitInstructorResponse(requestId, instructorId, action);
+    setBusy(false);
+    if (error) {
+      showToast(`エラー：${error.message}`);
+      return;
+    }
+    showToast(action === "accept" ? "依頼を承諾しました。依頼者の確定操作をお待ちください。" : "この依頼を却下しました。");
+    load();
+  }
+
+  async function submitQuote() {
+    const price = Number(quotePrice) || null;
+    if (!price) {
+      showToast("見積り金額を入力してください");
+      return;
+    }
+    setBusy(true);
+    const { error } = await submitInstructorResponse(requestId, instructorId, "quote", { quote_price: price, message: quoteMessage.trim() || null });
+    setBusy(false);
+    if (error) {
+      showToast(`エラー：${error.message}`);
+      return;
+    }
+    showToast("見積りを送信しました。");
+    load();
+  }
+
+  return (
+    <>
+      <Link href="/open-requests" className="breadcrumb">
+        ← 一覧に戻る
+      </Link>
+      <div className="request-card">
+        <div className="request-card__top">
+          <div>
+            <div className="request-card__title" style={{ fontSize: 20 }}>
+              {r.title}
+            </div>
+            <div className="request-card__meta">
+              <span>{r.requester_type === "company" ? "企業" : "生徒"}からの公募</span>
+              <span>{fmtDate(r.created_at)}</span>
+            </div>
+          </div>
+          <span className={`status-badge status-badge--${badgeClass(st.key)}`}>{st.label}</span>
+        </div>
+        <Tags r={r} />
+        <p className="request-card__desc" style={{ whiteSpace: "pre-wrap" }}>
+          {r.description}
+        </p>
+
+        {myResponse && (
+          <div className="request-card__response" style={{ marginTop: 20 }}>
+            <strong>
+              あなたの対応：
+              {myResponse.action === "accept" ? "承諾" : myResponse.action === "quote" ? `見積り ¥${Number(myResponse.quote_price || 0).toLocaleString()}` : "却下"}
+            </strong>
+            {myResponse.message ? myResponse.message : "（メッセージなし）"}
+          </div>
+        )}
+
+        {!myResponse && r.status === "pending" && (
+          <>
+            <div className="request-card__actions" ref={actionsRef} style={{ marginTop: 24 }}>
+              <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={() => respond("accept")}>
+                承諾する
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setQuoteOpen((v) => !v)}>
+                見積りを送る
+              </button>
+              <button type="button" className="btn btn--danger btn--sm" disabled={busy} onClick={() => respond("reject")}>
+                興味なし（却下）
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => {
+                  hideRequest();
+                  showToast("この依頼を非表示にしました。");
+                  setTimeout(() => {
+                    router.push("/open-requests");
+                  }, 700);
+                }}
+              >
+                この依頼を非表示にする
+              </button>
+            </div>
+            <div className={`inline-quote-form${quoteOpen ? " is-open" : ""}`}>
+              <div className="form-field">
+                <label>見積り金額（時間あたり）</label>
+                <input type="number" min={0} step={1000} placeholder="例：14000" value={quotePrice} onChange={(e) => setQuotePrice(e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>メッセージ</label>
+                <textarea rows={2} placeholder="見積りの補足があればご記入ください" value={quoteMessage} onChange={(e) => setQuoteMessage(e.target.value)} />
+              </div>
+              <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={submitQuote}>
+                この内容で見積りを送る
+              </button>
+            </div>
+          </>
+        )}
+
+        {st.key === "selected" && (
+          <>
+            <div className="contact-box" style={{ marginTop: 20 }}>
+              <strong>連絡先：</strong>
+              {requesterInfo ? (
+                <>
+                  <div>{requesterInfo.company_name ? `会社名：${requesterInfo.company_name}` : `担当者：${requesterInfo.name}`}</div>
+                  <div>メール：{requesterInfo.email}</div>
+                  <div>電話番号：{requesterInfo.phone || "未登録"}</div>
+                </>
+              ) : (
+                "読み込み中…"
+              )}
+            </div>
+            <p className="request-card__desc" style={{ color: "var(--color-ink-soft)", marginTop: 12 }}>
+              この依頼はあなたに決定しました。マイページの「受け取った依頼」からは表示されないため、進捗はこのページで確認してください。
+            </p>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function OwnerDetailView({ requestId, userId }: { requestId: string; userId: string }) {
+  const [r, setR] = useState<(TrainingRequestRow & { instructor_responses: InstructorResponseRow[] }) | null | undefined>(undefined);
+  const [notOwner, setNotOwner] = useState(false);
+  const [matched, setMatched] = useState<{ ins: InstructorPublicDirectoryRow; reasons: string[] }[] | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await getTrainingRequestWithResponses(requestId);
+      if (error || !data) {
+        setR(null);
+        return;
+      }
+      const row = data as unknown as TrainingRequestRow & { instructor_responses: InstructorResponseRow[] };
+      if (row.requester_id !== userId) {
+        setNotOwner(true);
+        return;
+      }
+      setR(row);
+
+      const { data: instructors, error: insError } = await getMatchingCandidateInstructors();
+      if (insError || !instructors) {
+        setMatched([]);
+        return;
+      }
+      let expertiseMatchIds = new Set<string>();
+      if (row.expertise_field) {
+        expertiseMatchIds = await getInstructorExpertiseInstructorIds(row.expertise_field);
+      }
+      function reasonsFor(ins: InstructorPublicDirectoryRow) {
+        const reasons: string[] = [];
+        if (expertiseMatchIds.has(ins.id)) reasons.push("分野");
+        const formatOk =
+          row.preferred_format === "both" ||
+          (row.preferred_format === "online" && (ins.work_style === "ONLINE" || ins.work_style === "HYBRID")) ||
+          (row.preferred_format === "offline" && (ins.work_style === "ONSITE" || ins.work_style === "HYBRID"));
+        if (formatOk) reasons.push("形態");
+        if (row.budget != null && ins.desired_rate_min != null && ins.desired_rate_min <= row.budget) reasons.push("予算");
+        return reasons;
+      }
+      function isRecommended(reasons: string[]) {
+        return reasons.includes("分野") || reasons.length >= 2;
+      }
+      const result = (instructors as InstructorPublicDirectoryRow[])
+        .map((ins) => ({ ins, reasons: reasonsFor(ins) }))
+        .filter((x) => x.reasons.length > 0)
+        .sort((a, b) => {
+          const strongDiff = (isRecommended(b.reasons) ? 1 : 0) - (isRecommended(a.reasons) ? 1 : 0);
+          if (strongDiff !== 0) return strongDiff;
+          return b.reasons.length - a.reasons.length;
+        })
+        .slice(0, 6);
+      setMatched(result);
+    })();
+  }, [requestId, userId]);
+
+  if (r === undefined && !notOwner) return <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>読み込み中…</p>;
+  if (r === null || notOwner) {
+    return (
+      <div className="empty-state" style={{ paddingTop: 80 }}>
+        <p className="empty-state__title">講師アカウントのみご利用いただけます</p>
+        <p className="empty-state__desc">公募中の依頼への応募は、講師アカウントでログインした場合のみ利用できます。</p>
+        <Link href="/mypage" className="btn btn--primary" style={{ marginTop: 16 }}>
+          マイページに戻る
+        </Link>
+      </div>
+    );
+  }
+  if (!r) return null;
+
+  return (
+    <>
+      <Link href="/mypage" className="breadcrumb">
+        ← マイページに戻る
+      </Link>
+      <div className="request-card">
+        <div className="request-card__top">
+          <div>
+            <div className="request-card__title" style={{ fontSize: 20 }}>
+              {r.title}
+            </div>
+            <div className="request-card__meta">
+              <span>{fmtDate(r.created_at)}</span>
+            </div>
+          </div>
+        </div>
+        <Tags r={r} />
+        <p className="request-card__desc" style={{ whiteSpace: "pre-wrap" }}>
+          {r.description}
+        </p>
+        <p className="request-card__desc" style={{ color: "var(--color-ink-soft)" }}>
+          応募件数：{(r.instructor_responses || []).length}件
+        </p>
+      </div>
+
+      <div style={{ marginTop: 28 }}>
+        <h2 className="section__title" style={{ fontSize: 16 }}>
+          この依頼に合いそうな講師
+        </h2>
+        <div style={{ marginTop: 12 }}>
+          {matched === null && <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>読み込み中…</p>}
+          {matched?.length === 0 && <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>現在、条件に合う講師が見つかりませんでした。</p>}
+          {matched?.map(({ ins, reasons }) => {
+            const isRecommended = reasons.includes("分野") || reasons.length >= 2;
+            return (
+              <Link href={`/instructor-detail?id=${ins.id}`} key={ins.id} style={{ display: "block", marginBottom: 10 }}>
+                <div className="request-card">
+                  <div className="request-card__top">
+                    <div>
+                      <div className="request-card__title">{ins.name || "（名前未設定）"}</div>
+                      <div className="request-card__meta">
+                        <span>{(ins.prefectures || []).join("、") || "エリア未設定"}</span>
+                      </div>
+                    </div>
+                    <span className="status-badge status-badge--accepted">★ {ins.rating_avg != null ? Number(ins.rating_avg).toFixed(1) : "-"}</span>
+                  </div>
+                  <div
+                    className={`notice-banner${isRecommended ? " is-visible" : ""}`}
+                    style={{ margin: "8px 0", fontSize: 12, ...(isRecommended ? {} : { opacity: 0.65, background: "var(--color-bg)" }) }}
+                  >
+                    {reasons.join("・")}が合致
+                  </div>
+                  <p className="request-card__desc">{ins.self_pr || "自己紹介は未登録です。"}</p>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function RequestDetailInner() {
+  const searchParams = useSearchParams();
+  const { authReady, user } = useAuth();
+  useRoleTheme("instructor");
+
+  const requestId = searchParams.get("id");
+  const focusRespond = searchParams.get("focus") === "respond";
+  const [loginGateOpen, setLoginGateOpen] = useState(false);
+
+  if (!requestId) {
+    return (
+      <main className="detail-page" style={{ maxWidth: 760 }}>
+        <NotFoundBlock />
+      </main>
+    );
+  }
+
+  return (
+    <main className="detail-page" style={{ maxWidth: 760 }}>
+      {!authReady ? (
+        <p style={{ color: "var(--color-ink-soft)", fontSize: 13 }}>読み込み中…</p>
+      ) : !user ? (
+        <PublicDetail requestId={requestId} onLoginGate={() => setLoginGateOpen(true)} />
+      ) : user.role === "INSTRUCTOR" ? (
+        <InstructorDetailView requestId={requestId} instructorId={user.id} focusRespond={focusRespond} />
+      ) : (
+        <OwnerDetailView requestId={requestId} userId={user.id} />
+      )}
+
+      <div className={`modal-overlay${loginGateOpen ? " is-open" : ""}`} onClick={(e) => e.target === e.currentTarget && setLoginGateOpen(false)}>
+        <div className="modal-box" style={{ maxWidth: 420, textAlign: "center" }}>
+          <button type="button" className="modal-close" aria-label="閉じる" onClick={() => setLoginGateOpen(false)}>
+            ×
+          </button>
+          <span className="hanko hanko--logo login-gate__icon" style={{ margin: "0 auto 16px" }}>
+            研
+          </span>
+          <p className="modal-title">ログインが必要です</p>
+          <p className="modal-desc">依頼に応募するには、講師アカウントでログインしてください。</p>
+          <div className="form-actions" style={{ flexDirection: "column" }}>
+            <Link href="/login" className="btn btn--primary btn--block">
+              ログイン
+            </Link>
+            <Link href="/register" className="btn btn--ghost btn--block">
+              新規登録
+            </Link>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export default function RequestDetailPage() {
+  return (
+    <Suspense fallback={<main className="detail-page" style={{ maxWidth: 760 }} />}>
+      <RequestDetailInner />
+    </Suspense>
+  );
+}

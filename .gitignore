@@ -1,11 +1,23 @@
 # Node
 node_modules/
-package-lock.json
 
-# Biến môi trường (nếu sau này bạn thêm file .env chứa key nhạy cảm)
+# Next.js
+/.next/
+/out/
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment variables (Supabase keys) — never commit actual values
 .env
 .env.local
+.env*.local
+!.env.example
 
-# Hệ điều hành
+# OS
 .DS_Store
 Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json

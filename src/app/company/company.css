@@ -1,0 +1,34 @@
+/* Ported verbatim from the <style> block inside company.html (page-scoped). */
+.company-table {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.company-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 16px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--color-border);
+}
+.company-row:last-child {
+  border-bottom: none;
+}
+.company-row dt {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.company-row dd {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--color-ink-soft);
+}
+@media (max-width: 560px) {
+  .company-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
