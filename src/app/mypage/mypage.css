@@ -1,0 +1,13 @@
+/* Ported verbatim from the <style> block inside mypage.html (page-scoped). */
+@keyframes kenshulink-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(23, 176, 138, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(23, 176, 138, 0);
+  }
+}
+.btn--pulse {
+  animation: kenshulink-pulse 1.6s ease-out infinite;
+}
