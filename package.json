@@ -1,0 +1,8 @@
+{
+  "name": "kenshulink",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix react-app",
+    "build": "npm run build --prefix react-app"
+  }
+}
