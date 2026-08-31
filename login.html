@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ログイン | ケンシュウリンク</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-active-nav="login.html">
+
+<div id="site-header"></div>
+
+<main class="auth-page">
+  <div class="auth-card">
+    <p class="auth-card__eyebrow">LOGIN</p>
+    <h1 class="auth-card__title">おかえりなさい</h1>
+    <p class="auth-card__desc">登録済みのアカウントでログインしてください。</p>
+
+    <div class="notice-banner" id="loginError">
+      メールアドレスまたはパスワードが正しくありません。
+    </div>
+
+    <form id="loginForm" novalidate>
+      <div class="form-field">
+        <label for="loginEmail">メールアドレス</label>
+        <input type="email" id="loginEmail" name="email" placeholder="you@example.com" required>
+        <p class="form-field__error">メールアドレスを正しく入力してください。</p>
+      </div>
+
+      <div class="form-field">
+        <label for="loginPassword">パスワード</label>
+        <input type="password" id="loginPassword" name="password" placeholder="••••••••" required>
+        <p class="form-field__error">パスワードを入力してください。</p>
+      </div>
+
+      <div style="text-align:right; margin-top:-8px; margin-bottom: 20px;">
+        <a href="forgot-password.html" style="font-size:12.5px; color: var(--color-ink-soft);">パスワードをお忘れですか？</a>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn--primary btn--block">ログイン</button>
+      </div>
+    </form>
+
+    <div class="divider">または</div>
+
+    <button type="button" class="btn btn--google" id="googleLogin">
+      Googleでログイン
+    </button>
+
+    <p class="auth-switch">
+      アカウントをお持ちでない方は <a href="register.html">新規登録</a>
+    </p>
+  </div>
+</main>
+
+<div id="site-footer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/supabase-client.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/layout.js"></script>
+<script>
+  document.getElementById("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const emailField = document.getElementById("loginEmail").closest(".form-field");
+    const passwordField = document.getElementById("loginPassword").closest(".form-field");
+    const email = document.getElementById("loginEmail").value;
+    const password = document.getElementById("loginPassword").value;
+
+    let hasError = false;
+    emailField.classList.toggle("has-error", !email.includes("@"));
+    passwordField.classList.toggle("has-error", password.length === 0);
+    if (!email.includes("@") || password.length === 0) hasError = true;
+
+    const errorBanner = document.getElementById("loginError");
+    errorBanner.classList.remove("is-visible");
+    if (hasError) return;
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "ログイン中…";
+
+    const { error } = await signInAccount(email, password);
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
+
+    if (error) {
+      errorBanner.textContent = error.message.includes("Invalid login credentials")
+        ? "メールアドレスまたはパスワードが正しくありません。"
+        : error.message.includes("Email not confirmed")
+          ? "メールアドレスの確認がまだ完了していません。確認メール内のリンクをクリックしてください。"
+          : error.message;
+      errorBanner.classList.add("is-visible");
+      return;
+    }
+
+    showToast("ログインしました");
+    setTimeout(() => { window.location.href = "mypage.html"; }, 500);
+  });
+
+  document.getElementById("googleLogin").addEventListener("click", async () => {
+    const btn = document.getElementById("googleLogin");
+    btn.disabled = true;
+    btn.textContent = "リダイレクト中…";
+
+    // ログインの場合は role 選択が不要（既存ユーザーは users テーブルに role が登録済みのため）。
+    // OAuth 完了後は Supabase が自動的に mypage.html へ戻す。
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}${window.location.pathname.replace(/login\.html$/, "")}mypage.html`,
+      },
+    });
+
+    if (error) {
+      showToast(`エラー：${error.message}`);
+      btn.disabled = false;
+      btn.textContent = "Googleでログイン";
+    }
+    // 成功時はブラウザが Google の認証画面にリダイレクトされるため、ここで追加処理は不要。
+  });
+</script>
+</body>
+</html>

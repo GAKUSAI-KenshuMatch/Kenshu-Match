@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>講師を探す | ケンシュウリンク</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .multi-select { position: relative; }
+  .multi-select summary {
+    list-style: none; cursor: pointer; padding: 9px 12px;
+    border: 1px solid var(--color-border); border-radius: var(--radius-s);
+    background: var(--color-surface); font-size: 13px; user-select: none;
+  }
+  .multi-select summary::-webkit-details-marker { display: none; }
+  .multi-select summary::after { content: "▾"; float: right; opacity: .6; }
+  .multi-select__panel {
+    position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 220px;
+    max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+    background: var(--color-surface); border: 1px solid var(--color-border);
+    border-radius: var(--radius-s); padding: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.08);
+  }
+  .multi-select__panel optgroup-label {
+    font-weight: 700; font-size: 12px; margin-top: 6px;
+  }
+  .multi-select__option {
+    display: flex; align-items: center; gap: 6px; font-size: 12.5px;
+    padding: 4px 6px; border-radius: var(--radius-s); cursor: pointer;
+  }
+  .multi-select__option:hover { background: var(--color-bg); }
+  .multi-select__option input { width: auto; }
+</style>
+</head>
+<body data-active-nav="instructors.html" data-role-theme="business">
+
+<div id="site-header"></div>
+
+<main class="list-page">
+  <div class="list-page__head">
+    <h1 class="list-page__title">講師を探す</h1>
+    <p class="list-page__count"><strong id="resultCount">-</strong> 件の講師が見つかりました</p>
+  </div>
+
+  <!-- 分野カテゴリ経由で来た場合のバナー（JSで動的に表示） -->
+  <div id="categoryBanner"></div>
+
+  <!-- ===================== フィルターバー ===================== -->
+  <form class="filter-bar" id="filterForm">
+    <div class="filter-field">
+      <label>分野（複数選択可）</label>
+      <details class="multi-select" id="expertiseDetails">
+        <summary>すべて</summary>
+        <div class="multi-select__panel" id="expertiseOptions"></div>
+      </details>
+    </div>
+
+    <div class="filter-field">
+      <label>対応エリア（複数選択可）</label>
+      <details class="multi-select" id="areaDetails">
+        <summary>すべて</summary>
+        <div class="multi-select__panel" id="areaOptions"></div>
+      </details>
+    </div>
+
+    <div class="filter-field">
+      <label>形態（複数選択可）</label>
+      <details class="multi-select" id="formatDetails">
+        <summary>すべて</summary>
+        <div class="multi-select__panel" id="formatOptions">
+          <label class="multi-select__option"><input type="checkbox" value="ONLINE"> オンライン</label>
+          <label class="multi-select__option"><input type="checkbox" value="ONSITE"> 対面</label>
+          <label class="multi-select__option"><input type="checkbox" value="HYBRID"> オンライン・対面 両方</label>
+        </div>
+      </details>
+    </div>
+
+    <div class="filter-field">
+      <label for="filterRateMin">希望単価（円／時間）</label>
+      <input type="number" id="filterRateMin" min="0" step="1000" placeholder="例：10000">
+    </div>
+
+    <div class="filter-field">
+      <label for="filterRateMax">最低単価（円／時間）</label>
+      <input type="number" id="filterRateMax" min="0" step="1000" placeholder="例：20000">
+    </div>
+
+    <button type="button" class="filter-reset" id="resetFilters">条件をリセット</button>
+  </form>
+
+  <!-- ===================== 講師一覧 ===================== -->
+  <div class="instructor-grid" id="instructorGrid">
+    <div class="empty-state"><p class="empty-state__desc">読み込み中…</p></div>
+  </div>
+</main>
+
+<div id="site-footer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/supabase-client.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/layout.js"></script>
+<script>
+  const areaOptions = document.getElementById("areaOptions");
+  const areaDetails = document.getElementById("areaDetails");
+  const formatOptions = document.getElementById("formatOptions");
+  const formatDetails = document.getElementById("formatDetails");
+  const expertiseOptions = document.getElementById("expertiseOptions");
+  const expertiseDetails = document.getElementById("expertiseDetails");
+  const rateMinInput = document.getElementById("filterRateMin");
+  const rateMaxInput = document.getElementById("filterRateMax");
+  const grid = document.getElementById("instructorGrid");
+  const resultCount = document.getElementById("resultCount");
+
+  // チェックされた値の一覧を取得し、選択中の件数をsummaryラベルに反映する共通ヘルパー
+  function getChecked(container) {
+    return Array.from(container.querySelectorAll("input[type=checkbox]:checked")).map(el => el.value);
+  }
+  function updateSummaryLabel(detailsEl, checkedValues, allLabel) {
+    const summary = detailsEl.querySelector("summary");
+    summary.textContent = checkedValues.length ? `${checkedValues.length}件選択中` : allLabel;
+  }
+
+  // トップページの「研修分野から探す」から遷移してきた場合、URL の ?category= を読み取り、
+  // そのカテゴリに属する全サブカテゴリのいずれかを持つ講師を絞り込む（単一サブカテゴリ選択とは別軸）。
+  const urlParams = new URLSearchParams(location.search);
+  const categoryParam = urlParams.get("category");
+  let categorySubcategoryNames = null; // categoryParam に対応するサブカテゴリ名の配列（見つかった場合のみセット）
+
+  const WORK_STYLE_LABEL = { ONLINE: "オンラインのみ", ONSITE: "対面のみ", HYBRID: "オンライン・対面 両方" };
+
+  const JP_PREFECTURES = [
+    "オンライン対応（全国）",
+    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+    "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県",
+    "三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県",
+    "鳥取県","島根県","岡山県","広島県","山口県",
+    "徳島県","香川県","愛媛県","高知県",
+    "福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県",
+  ];
+
+  let allInstructors = [];
+
+  function initial(name) {
+    return (name || "?").trim().slice(0, 1);
+  }
+
+  function renderCard(ins) {
+    const rate = ins.desired_rate_min != null ? `¥${Number(ins.desired_rate_min).toLocaleString()}` : "応相談";
+    const rating = ins.rating_avg != null ? Number(ins.rating_avg).toFixed(1) : "-";
+    const fieldTags = (ins.expertise_fields || []).map(f => `<span class="instructor-card__tag">${f}</span>`).join("");
+    const certTag = ins.certifications ? `<span class="instructor-card__tag">${ins.certifications}</span>` : "";
+    return `
+      <a href="instructor-detail.html?id=${ins.id}" style="display:block;">
+      <article class="instructor-card">
+        <div class="instructor-card__top">
+          <span class="instructor-card__avatar">${initial(ins.name)}</span>
+          <div>
+            <div class="instructor-card__name">${ins.name || "（名前未設定）"}</div>
+            <div class="instructor-card__area">${(ins.prefectures || []).length ? ins.prefectures.join("、") : "エリア未設定"}</div>
+          </div>
+          <span class="instructor-card__rating">★ ${rating}${ins.review_count ? ` (${ins.review_count})` : ""}</span>
+        </div>
+        <p class="instructor-card__intro">${ins.self_pr || "自己紹介は未登録です。"}</p>
+        <div class="instructor-card__tags">${fieldTags}${certTag}</div>
+        <div class="instructor-card__bottom">
+          <div class="instructor-card__rate">${rate}<span>／時間〜</span></div>
+          <div class="instructor-card__format">${WORK_STYLE_LABEL[ins.work_style] || ins.work_style || ""}</div>
+        </div>
+      </article>
+      </a>
+    `;
+  }
+
+  function showCategoryBanner(categoryName) {
+    const banner = document.getElementById("categoryBanner");
+    banner.innerHTML = `
+      <div class="notice-banner is-visible" style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;">
+        <span>「${categoryName}」の分野で絞り込み中です</span>
+        <button type="button" id="clearCategoryFilter" class="btn btn--ghost btn--sm">絞り込みを解除</button>
+      </div>
+    `;
+    document.getElementById("clearCategoryFilter").addEventListener("click", () => {
+      categorySubcategoryNames = null;
+      banner.innerHTML = "";
+      const url = new URL(location.href);
+      url.searchParams.delete("category");
+      history.replaceState(null, "", url);
+      applyFilters();
+    });
+  }
+
+  async function populateExpertiseFilterFromTaxonomy() {
+    const { data: categories, error } = await supabaseClient
+      .from("training_categories")
+      .select("name, sort_order, training_subcategories(name)")
+      .order("sort_order");
+
+    if (error || !categories) return;
+
+    expertiseOptions.innerHTML = categories.map(cat => `
+      <div class="optgroup-label">${cat.name}</div>
+      ${(cat.training_subcategories || []).map(sc => `
+        <label class="multi-select__option"><input type="checkbox" value="${sc.name}"> ${sc.name}</label>
+      `).join("")}
+    `).join("");
+
+    expertiseOptions.querySelectorAll("input[type=checkbox]").forEach(el => {
+      el.addEventListener("change", () => {
+        updateSummaryLabel(expertiseDetails, getChecked(expertiseOptions), "すべて");
+        applyFilters();
+      });
+    });
+
+    if (categoryParam) {
+      const matched = categories.find(cat => cat.name === categoryParam);
+      if (matched) {
+        categorySubcategoryNames = (matched.training_subcategories || []).map(sc => sc.name);
+        showCategoryBanner(matched.name);
+      }
+    }
+  }
+
+  function populateFilterOptions() {
+    areaOptions.innerHTML = JP_PREFECTURES.map(v => `
+      <label class="multi-select__option"><input type="checkbox" value="${v}"> ${v}</label>
+    `).join("");
+    areaOptions.querySelectorAll("input[type=checkbox]").forEach(el => {
+      el.addEventListener("change", () => {
+        updateSummaryLabel(areaDetails, getChecked(areaOptions), "すべて");
+        applyFilters();
+      });
+    });
+  }
+
+  function applyFilters() {
+    const areas = getChecked(areaOptions);
+    const formats = getChecked(formatOptions);
+    const fields = getChecked(expertiseOptions);
+    const rateMin = rateMinInput.value ? Number(rateMinInput.value) : null; // 希望単価（下限）
+    const rateMax = rateMaxInput.value ? Number(rateMaxInput.value) : null; // 最低単価（上限）
+
+    const filtered = allInstructors.filter(ins => {
+      if (areas.length && !areas.some(a => (ins.prefectures || []).includes(a))) return false;
+      if (formats.length) {
+        const matches = formats.includes(ins.work_style) || (ins.work_style === "HYBRID" && formats.length);
+        if (!matches) return false;
+      }
+      // ご希望の単価帯として入力された金額と、講師本人の単価レンジ（最低単価〜希望単価）が
+      // 重なっているかどうかで絞り込む。
+      if (rateMin != null && (ins.desired_rate_max == null || ins.desired_rate_max < rateMin)) return false;
+      if (rateMax != null && (ins.desired_rate_min == null || ins.desired_rate_min > rateMax)) return false;
+      if (fields.length && !fields.some(f => (ins.expertise_fields || []).includes(f))) return false;
+      if (categorySubcategoryNames && !(ins.expertise_fields || []).some(f => categorySubcategoryNames.includes(f))) return false;
+      return true;
+    });
+
+    resultCount.textContent = filtered.length;
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <span class="hanko hanko--role" style="width:44px;height:44px;font-size:20px;">無</span>
+          <p class="empty-state__title">条件に合う講師が見つかりませんでした</p>
+          <p class="empty-state__desc">条件を変更するか、リセットして再度お試しください。</p>
+        </div>
+      `;
+      return;
+    }
+
+    grid.innerHTML = filtered.map(renderCard).join("");
+  }
+
+  async function loadInstructorsData() {
+    const { data, error } = await supabaseClient
+      .from("instructor_public_directory")
+      .select("*")
+      .order("rating_avg", { ascending: false });
+
+    if (error) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <p class="empty-state__title">読み込みに失敗しました</p>
+          <p class="empty-state__desc">${error.message}</p>
+        </div>
+      `;
+      return;
+    }
+
+    allInstructors = data || [];
+    populateFilterOptions();
+  }
+
+  formatOptions.querySelectorAll("input[type=checkbox]").forEach(el => {
+    el.addEventListener("change", () => {
+      updateSummaryLabel(formatDetails, getChecked(formatOptions), "すべて");
+      applyFilters();
+    });
+  });
+  [rateMinInput, rateMaxInput].forEach(el => el.addEventListener("input", applyFilters));
+
+  // 複数選択パネルは同時に1つだけ開いた状態にし、パネル外をクリックしたら閉じる
+  const allDetails = [expertiseDetails, areaDetails, formatDetails];
+  allDetails.forEach(d => {
+    d.addEventListener("toggle", () => {
+      if (d.open) {
+        allDetails.filter(other => other !== d).forEach(other => { other.open = false; });
+      }
+    });
+  });
+  document.addEventListener("click", (e) => {
+    allDetails.forEach(d => {
+      if (d.open && !d.contains(e.target)) d.open = false;
+    });
+  });
+
+  document.getElementById("resetFilters").addEventListener("click", () => {
+    document.querySelectorAll(".multi-select__panel input[type=checkbox]").forEach(el => { el.checked = false; });
+    updateSummaryLabel(areaDetails, [], "すべて");
+    updateSummaryLabel(formatDetails, [], "すべて");
+    updateSummaryLabel(expertiseDetails, [], "すべて");
+    rateMinInput.value = "";
+    rateMaxInput.value = "";
+    applyFilters();
+  });
+
+  (async () => {
+    // カテゴリ絞り込み・講師データの両方が揃ってから最初の描画を行う（初回のちらつき・競合を防ぐ）
+    await Promise.all([loadInstructorsData(), populateExpertiseFilterFromTaxonomy()]);
+    applyFilters();
+  })();
+</script>
+</body>
+</html>

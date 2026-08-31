@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>研修を依頼する（公募） | ケンシュウリンク</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-active-nav="post-request.html" data-role-theme="business">
+
+<div id="site-header"></div>
+
+<main class="detail-page" id="postRequestMain">
+  <!-- JSで動的に描画 -->
+</main>
+
+<div id="site-footer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/supabase-client.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/layout.js"></script>
+<script>
+  let subcategories = [];
+
+  // XSS対策: 分野名はユーザーの自由入力を含む可能性があるため、
+  // innerHTMLに差し込む前に必ずこの関数を通す。
+  function escapeHtml(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  /* --- ログイン状態／ロールのチェック --- */
+  function renderGate(kind) {
+    const main = document.getElementById("postRequestMain");
+    if (kind === "no-user") {
+      main.innerHTML = `
+        <div class="empty-state" style="padding-top:80px;">
+          <span class="hanko hanko--logo" style="margin:0 auto 16px;">研</span>
+          <p class="empty-state__title">依頼を投稿するにはログインが必要です</p>
+          <p class="empty-state__desc">研修の依頼は、企業または生徒アカウントでログインした場合のみ投稿できます。</p>
+          <div class="form-actions" style="flex-direction:column; max-width:320px; margin:16px auto 0;">
+            <a href="login.html" class="btn btn--primary btn--block">ログイン</a>
+            <a href="register.html" class="btn btn--ghost btn--block">新規登録</a>
+          </div>
+        </div>
+      `;
+    } else if (kind === "instructor") {
+      main.innerHTML = `
+        <div class="empty-state" style="padding-top:80px;">
+          <p class="empty-state__title">講師アカウントではご利用いただけません</p>
+          <p class="empty-state__desc">研修の依頼投稿は、企業または生徒アカウントでログインした場合のみ利用できます。</p>
+          <a href="open-requests.html" class="btn btn--primary" style="margin-top:16px;">公募中の依頼を見る</a>
+        </div>
+      `;
+    }
+  }
+
+  /* --- フォームの描画 --- */
+  function renderForm(user) {
+    const main = document.getElementById("postRequestMain");
+    main.innerHTML = `
+      <p class="breadcrumb">
+        <a href="index.html">トップ</a><span class="sep">/</span>
+        研修を依頼する（公募）
+      </p>
+
+      <div style="max-width:720px; margin:0 auto;">
+        <h1 class="detail-header__name" style="margin-bottom:8px;">研修を依頼する（公募）</h1>
+        <p class="modal-desc" style="margin-bottom:24px;">
+          特定の講師を指定せず、条件に合う講師からの提案を広く募集します。投稿後、興味を持った講師が承諾・見積りで返信します。
+        </p>
+
+        <div class="form-card">
+          <div class="notice-banner" id="postFormError">入力内容をご確認ください。</div>
+
+          <form id="postRequestForm" novalidate>
+            <div class="form-field">
+              <label for="reqTitle">依頼タイトル</label>
+              <input type="text" id="reqTitle" placeholder="例：新人エンジニア向けPython基礎研修" required>
+              <p class="form-field__error">タイトルを入力してください。</p>
+            </div>
+
+            <div class="form-field">
+              <label for="reqExpertise">希望分野</label>
+              <select id="reqExpertise" required></select>
+              <div style="display:flex; gap:6px; margin-top:8px;">
+                <input type="text" id="reqExpertiseNewInput" placeholder="リストにない分野を入力（例：〇〇研修）" maxlength="50" style="flex:1; padding:9px 12px; font-size:13px; border:1px solid var(--color-border); border-radius:var(--radius-s); background:var(--color-surface);">
+                <button type="button" class="btn btn--ghost btn--sm" id="reqExpertiseAddBtn">追加</button>
+              </div>
+              <p class="form-field__hint">リストに希望の分野がない場合は、こちらから新しく追加できます。</p>
+            </div>
+
+            <div class="form-row">
+              <div class="form-field">
+                <label for="reqFormat">希望形態</label>
+                <select id="reqFormat" required></select>
+              </div>
+              <div class="form-field">
+                <label for="reqBudget">想定予算（時間あたり）</label>
+                <input type="number" id="reqBudget" placeholder="例：15000" min="0" step="1000">
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label for="reqParticipants">対象人数</label>
+              <input type="number" id="reqParticipants" placeholder="例：10" min="1" step="1">
+            </div>
+
+            <div class="form-field" id="reqLocationField">
+              <label for="reqLocation">実施場所（対面の場合は必須）</label>
+              <input type="text" id="reqLocation" placeholder="例：東京都内オフィス">
+            </div>
+
+            <div class="form-field">
+              <label for="reqSchedule">希望日程</label>
+              <input type="text" id="reqSchedule" placeholder="例：8月中旬 平日午後">
+            </div>
+
+            <div class="form-field">
+              <label for="reqDescription">依頼内容の詳細</label>
+              <textarea id="reqDescription" rows="5" placeholder="研修の目的、対象人数、レベル感などをご記入ください" required></textarea>
+              <p class="form-field__error">依頼内容を入力してください。</p>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn--primary btn--block">この内容で公募する</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    populateForm();
+    attachSubmitHandler(user);
+  }
+
+  /* --- 分野・形態の選択肢を組み立て --- */
+  async function populateForm() {
+    const expertiseSelect = document.getElementById("reqExpertise");
+
+    if (subcategories.length === 0) {
+      const { data, error } = await supabaseClient
+        .from("training_subcategories")
+        .select("id, name, category_id, training_categories(name)")
+        .order("name");
+      if (!error) subcategories = data || [];
+    }
+
+    expertiseSelect.innerHTML = subcategories.length
+      ? subcategories.map(s => `<option value="${s.id}">${escapeHtml(s.training_categories?.name || "")} ／ ${escapeHtml(s.name)}</option>`).join("")
+      : `<option value="">分野データを読み込めませんでした</option>`;
+
+    const formatSelect = document.getElementById("reqFormat");
+    formatSelect.innerHTML = `
+      <option value="online">オンライン</option>
+      <option value="offline">対面</option>
+      <option value="both">オンライン・対面 両方</option>
+    `;
+    formatSelect.addEventListener("change", toggleLocationRequired);
+    toggleLocationRequired();
+
+    attachExpertiseAddHandler();
+  }
+
+  /* --- 「希望分野」に一覧にない分野を追加するボタン ---
+     リストにない分野は「その他」カテゴリの下にサブカテゴリとして新規登録する。
+     「その他」カテゴリ自体は事前にDB側で用意しておく必要がある（front-endからは
+     カテゴリそのものは作成しない。サブカテゴリのみ追加可能）。 */
+  async function attachExpertiseAddHandler() {
+    const input = document.getElementById("reqExpertiseNewInput");
+    const btn = document.getElementById("reqExpertiseAddBtn");
+    const select = document.getElementById("reqExpertise");
+
+    async function handleAdd() {
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+
+      // 既存の選択肢に同名（大文字小文字区別なし）のものがあれば、それを選択するだけにする。
+      const dupOption = [...select.options].find(o => o.textContent.split("／")[1]?.trim().toLowerCase() === name.toLowerCase());
+      if (dupOption) {
+        select.value = dupOption.value;
+        input.value = "";
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "追加中…";
+
+      const { data: otherCategory, error: catError } = await supabaseClient
+        .from("training_categories")
+        .select("id, name")
+        .eq("name", "その他")
+        .maybeSingle();
+
+      if (catError || !otherCategory) {
+        showToast("分野の追加に失敗しました。管理者にご確認ください。");
+        btn.disabled = false;
+        btn.textContent = "追加";
+        return;
+      }
+
+      const { data: existingSc } = await supabaseClient
+        .from("training_subcategories")
+        .select("id, name")
+        .eq("category_id", otherCategory.id)
+        .ilike("name", name)
+        .maybeSingle();
+
+      let newOptionId, newOptionName;
+      if (existingSc) {
+        newOptionId = existingSc.id;
+        newOptionName = existingSc.name;
+      } else {
+        // training_subcategories.sort_order は NOT NULL のため、同じカテゴリ内の
+        // 最大値+1を計算してから登録する（既存の並び順を崩さず末尾に追加される）。
+        const { data: maxRow } = await supabaseClient
+          .from("training_subcategories")
+          .select("sort_order")
+          .eq("category_id", otherCategory.id)
+          .order("sort_order", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const nextSortOrder = (maxRow?.sort_order || 0) + 1;
+
+        const { data: created, error: createError } = await supabaseClient
+          .from("training_subcategories")
+          .insert({ category_id: otherCategory.id, name, sort_order: nextSortOrder })
+          .select("id, name")
+          .single();
+
+        if (createError) {
+          console.error("subcategory create error:", createError);
+          showToast("分野の追加に失敗しました。もう一度お試しください。");
+          btn.disabled = false;
+          btn.textContent = "追加";
+          return;
+        }
+        newOptionId = created.id;
+        newOptionName = created.name;
+      }
+
+      const option = document.createElement("option");
+      option.value = newOptionId;
+      option.textContent = `${otherCategory.name} ／ ${newOptionName}`;
+      select.appendChild(option);
+      select.value = newOptionId;
+
+      input.value = "";
+      btn.disabled = false;
+      btn.textContent = "追加";
+      showToast(`「${newOptionName}」を追加しました。`);
+    }
+
+    btn.addEventListener("click", handleAdd);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); handleAdd(); }
+    });
+  }
+
+  function toggleLocationRequired() {
+    const format = document.getElementById("reqFormat").value;
+    const locationField = document.getElementById("reqLocationField");
+    locationField.style.display = format === "online" ? "none" : "block";
+  }
+
+  /* --- 送信処理 --- */
+  function attachSubmitHandler(user) {
+    document.getElementById("postRequestForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const title = document.getElementById("reqTitle");
+      const description = document.getElementById("reqDescription");
+      const expertise = document.getElementById("reqExpertise");
+      const format = document.getElementById("reqFormat").value;
+      const locationInput = document.getElementById("reqLocation");
+
+      let hasError = false;
+      title.closest(".form-field").classList.toggle("has-error", !title.value.trim());
+      description.closest(".form-field").classList.toggle("has-error", !description.value.trim());
+      if (!title.value.trim() || !description.value.trim()) hasError = true;
+      if (format !== "online" && !locationInput.value.trim()) hasError = true;
+
+      document.getElementById("postFormError").textContent =
+        format !== "online" && !locationInput.value.trim()
+          ? "対面の場合は実施場所の入力が必要です。"
+          : "入力内容をご確認ください。";
+      document.getElementById("postFormError").classList.toggle("is-visible", hasError);
+      if (hasError) return;
+
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = "送信中…";
+
+      const { error } = await supabaseClient.from("training_requests").insert({
+        requester_id: user.id,
+        requester_type: user.role === "COMPANY" ? "company" : "individual",
+        title: title.value.trim(),
+        description: description.value.trim(),
+        expertise_field: expertise.value,
+        budget: Number(document.getElementById("reqBudget").value) || null,
+        participant_count: Number(document.getElementById("reqParticipants").value) || null,
+        preferred_format: format,
+        location: format === "online" ? null : locationInput.value.trim(),
+        preferred_schedule: document.getElementById("reqSchedule").value.trim() || null,
+        target_instructor_id: null,
+      });
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = "この内容で公募する";
+
+      if (error) {
+        document.getElementById("postFormError").textContent = `送信に失敗しました：${error.message}`;
+        document.getElementById("postFormError").classList.add("is-visible");
+        return;
+      }
+
+      showToast("依頼を公募しました。講師からの返信をマイページで確認できます。");
+      setTimeout(() => { location.href = "mypage.html"; }, 800);
+    });
+  }
+
+  (async () => {
+    if (!authReady) {
+      await new Promise(resolve => document.addEventListener("kenshulink:authchange", resolve, { once: true }));
+    }
+    const user = getCurrentUser();
+
+    if (!user) { renderGate("no-user"); return; }
+    if (user.role === "INSTRUCTOR") { renderGate("instructor"); return; }
+
+    renderForm(user);
+  })();
+</script>
+</body>
+</html>

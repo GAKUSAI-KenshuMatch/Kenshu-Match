@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>講師プロフィール編集 | ケンシュウリンク</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-active-nav="mypage.html" data-role-theme="instructor">
+
+<div id="site-header"></div>
+
+<main class="auth-page" style="align-items:flex-start; padding-top:40px;">
+  <div class="auth-card" style="max-width:640px;" id="profileCard">
+    <p class="auth-card__eyebrow">INSTRUCTOR PROFILE</p>
+    <h1 class="auth-card__title">講師プロフィール</h1>
+    <p class="auth-card__desc">
+      ここで入力した内容は「講師を探す」の検索結果・詳細ページに公開されます。
+      連絡先（メール・電話）は依頼が承諾されるまで他のユーザーには表示されません。
+    </p>
+
+    <div class="notice-banner" id="profileError">入力内容をご確認ください。</div>
+    <div id="profileFormWrap">
+      <p style="color:var(--color-ink-soft); font-size:13px;">読み込み中…</p>
+    </div>
+  </div>
+</main>
+
+<div id="site-footer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/supabase-client.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/layout.js"></script>
+<script>
+  const JP_PREFECTURES = [
+    "オンライン対応（全国）",
+    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+    "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県",
+    "三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県",
+    "鳥取県","島根県","岡山県","広島県","山口県",
+    "徳島県","香川県","愛媛県","高知県",
+    "福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県",
+  ];
+
+  const wrap = document.getElementById("profileFormWrap");
+  const errorBanner = document.getElementById("profileError");
+
+  // XSS対策: 専門分野の新規スキル名はユーザーの自由入力のため、
+  // innerHTMLに差し込む前に必ずこの関数を通す。
+  function escapeHtml(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  // DBのCHECK制約などの生エラーを、そのままユーザーに見せないための変換マップ。
+  // 今後DBエラーが増えた場合は、ここにキーワードを追加していく想定。
+  function friendlyErrorMessage(error) {
+    const msg = error?.message || "";
+    if (msg.includes("chk_instructor_profiles_rate_order")) {
+      return "最低単価は希望単価以下の金額にしてください。";
+    }
+    // 想定外のエラーは、原因不明のまま生メッセージを見せるよりはマシな汎用文言にする
+    return "保存に失敗しました。入力内容をご確認のうえ、もう一度お試しください。";
+  }
+
+  function formHtml(p) {
+    p = p || {};
+    return `
+      <form id="profileForm" novalidate>
+        <div class="form-field">
+          <label for="yearsExp">経験年数</label>
+          <input type="number" id="yearsExp" min="0" step="1" placeholder="例：8" value="${p.years_of_experience ?? ""}">
+        </div>
+
+        <div class="form-field">
+          <label>対応エリア（都道府県・複数選択可）</label>
+          <details id="prefectureDetails" style="border:1px solid var(--color-border); border-radius:var(--radius-s); background:var(--color-bg);">
+            <summary id="prefectureSummary" style="padding:10px 14px; cursor:pointer; font-size:13.5px; color:var(--color-text-muted);">
+              ${(p.prefectures || []).length ? (p.prefectures.length + "件選択中：" + p.prefectures.join("、")) : "選択してください"}
+            </summary>
+            <div id="prefectureGroup" style="display:flex; flex-wrap:wrap; gap:8px; padding:14px; border-top:1px solid var(--color-border);">
+              ${JP_PREFECTURES.map(pref => `
+                <label style="display:flex; align-items:center; gap:5px; font-size:12.5px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-pill); padding:5px 12px; cursor:pointer;">
+                  <input type="checkbox" name="prefecture" value="${pref}" style="width:auto;" ${(p.prefectures || []).includes(pref) ? "checked" : ""}>
+                  ${pref}
+                </label>
+              `).join("")}
+            </div>
+          </details>
+        </div>
+
+        <div class="form-field">
+          <label for="workStyle">対応形態</label>
+          <select id="workStyle">
+            <option value="">選択してください</option>
+            <option value="ONLINE" ${p.work_style === "ONLINE" ? "selected" : ""}>オンラインのみ</option>
+            <option value="ONSITE" ${p.work_style === "ONSITE" ? "selected" : ""}>対面のみ</option>
+            <option value="HYBRID" ${p.work_style === "HYBRID" ? "selected" : ""}>オンライン・対面 両方</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="selfPr">自己紹介・実績</label>
+          <textarea id="selfPr" rows="5" placeholder="研修内容、実績、得意分野などをご記入ください">${p.self_pr || ""}</textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field" id="rateMaxField">
+            <label for="rateMax">希望単価（円／時間）</label>
+            <input type="number" id="rateMax" min="0" step="1000" placeholder="例：18000" value="${p.desired_rate_max ?? ""}" required>
+            <p class="form-field__error">希望単価を入力してください。</p>
+          </div>
+          <div class="form-field" id="rateMinField">
+            <label for="rateMin">最低単価（円／時間）</label>
+            <input type="number" id="rateMin" min="0" step="1000" placeholder="例：10000" value="${p.desired_rate_min ?? ""}" required>
+            <p class="form-field__error">最低単価を入力してください。</p>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label for="certifications">保有資格</label>
+          <input type="text" id="certifications" placeholder="例：基本情報技術者試験" value="${p.certifications || ""}">
+        </div>
+
+        <div class="form-field">
+          <label for="portfolioUrl">ポートフォリオ／実績URL（任意）</label>
+          <input type="text" id="portfolioUrl" placeholder="https://..." value="${p.portfolio_url || ""}">
+        </div>
+
+        <div class="form-field">
+          <label for="avatarUrl">プロフィール画像URL（任意）</label>
+          <input type="text" id="avatarUrl" placeholder="https://..." value="${p.avatar_url || ""}">
+        </div>
+
+        <div class="form-row">
+          <div class="form-field">
+            <label for="contactEmail">連絡先メール（マッチング成立後に開示）</label>
+            <input type="email" id="contactEmail" placeholder="you@example.com" value="${p.contact_email || ""}">
+          </div>
+          <div class="form-field">
+            <label for="contactPhone">連絡先電話番号（マッチング成立後に開示）</label>
+            <input type="text" id="contactPhone" placeholder="090-xxxx-xxxx" value="${p.contact_phone || ""}">
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label>専門分野（複数選択可）</label>
+          <div id="expertiseGroup" style="display:flex; flex-direction:column; gap:14px; padding:14px; background:var(--color-bg); border-radius:var(--radius-s);">
+            <p style="font-size:12.5px; color:var(--color-ink-soft); margin:0;">読み込み中…</p>
+          </div>
+        </div>
+
+        <div class="form-field" style="display:flex; align-items:center; gap:10px;">
+          <label class="toggle-switch">
+            <input type="checkbox" id="isPublic" ${p.is_public === false ? "" : "checked"}>
+            <span class="toggle-switch__track"></span>
+          </label>
+          <label for="isPublic" style="margin:0; cursor:pointer;">プロフィールを公開する（オフにすると検索結果に表示されません）</label>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn--primary btn--block">保存する</button>
+        </div>
+      </form>
+    `;
+  }
+
+  async function init() {
+    // authchange が発火してからでないと getCurrentUser() が未確定のことがあるので待つ
+    if (!authReady) {
+      await new Promise(resolve => document.addEventListener("kenshulink:authchange", resolve, { once: true }));
+    }
+    const user = getCurrentUser();
+
+    if (!user) {
+      wrap.innerHTML = `<p style="font-size:13px;">プロフィールを編集するにはログインしてください。 <a href="login.html" style="color:var(--color-primary); font-weight:700;">ログイン</a></p>`;
+      return;
+    }
+    if (user.role !== "INSTRUCTOR") {
+      wrap.innerHTML = `<p style="font-size:13px;">このページは講師アカウントのみ利用できます。</p><a href="mypage.html" class="btn btn--ghost" style="margin-top:12px;">マイページへ戻る</a>`;
+      return;
+    }
+
+    const { data: profile, error: fetchError } = await supabaseClient
+      .from("instructor_profiles")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (fetchError) {
+      wrap.innerHTML = `<p style="color:var(--color-danger); font-size:13px;">読み込みエラー：${fetchError.message}</p>`;
+      return;
+    }
+
+    wrap.innerHTML = formHtml(profile);
+    await renderExpertiseGroup(user.id);
+
+    // 対応エリアの<summary>を選択状況に応じて動的に更新する
+    function updatePrefectureSummary() {
+      const selected = [...document.querySelectorAll('#prefectureGroup input[name="prefecture"]:checked')].map(cb => cb.value);
+      document.getElementById("prefectureSummary").textContent =
+        selected.length ? `${selected.length}件選択中：${selected.join("、")}` : "選択してください";
+    }
+    document.getElementById("prefectureGroup").addEventListener("change", updatePrefectureSummary);
+
+    document.getElementById("profileForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorBanner.classList.remove("is-visible");
+
+      const payload = {
+        id: user.id,
+        prefectures: (() => {
+          const selected = [...document.querySelectorAll('#prefectureGroup input[name="prefecture"]:checked')].map(cb => cb.value);
+          return selected.length ? selected : null;
+        })(),
+        years_of_experience: document.getElementById("yearsExp").value ? Number(document.getElementById("yearsExp").value) : null,
+        work_style: document.getElementById("workStyle").value.trim() || null,
+        self_pr: document.getElementById("selfPr").value.trim() || null,
+        desired_rate_min: document.getElementById("rateMin").value ? Number(document.getElementById("rateMin").value) : null,
+        desired_rate_max: document.getElementById("rateMax").value ? Number(document.getElementById("rateMax").value) : null,
+        certifications: document.getElementById("certifications").value.trim() || null,
+        portfolio_url: document.getElementById("portfolioUrl").value.trim() || null,
+        avatar_url: document.getElementById("avatarUrl").value.trim() || null,
+        contact_email: document.getElementById("contactEmail").value.trim() || null,
+        contact_phone: document.getElementById("contactPhone").value.trim() || null,
+        is_public: document.getElementById("isPublic").checked,
+      };
+
+      const rawSubcategoryValues = [...document.querySelectorAll('#expertiseGroup input[type="checkbox"]:checked')].map(cb => cb.value);
+      const existingSubcategoryIds = rawSubcategoryValues.filter(v => !v.startsWith("NEW::"));
+      // 「新しいスキルを追加」ボタンで作られたチェックボックスは値が "NEW::カテゴリID::URLエンコード名" 形式。
+      // ここでカテゴリIDとスキル名を取り出し、DB登録（既存 or 新規）は保存処理の中で行う。
+      const newSkillItems = rawSubcategoryValues
+        .filter(v => v.startsWith("NEW::"))
+        .map(v => {
+          const [, categoryId, encodedName] = v.split("::");
+          return { categoryId, name: decodeURIComponent(encodedName) };
+        });
+
+      const rateMinField = document.getElementById("rateMinField");
+      const rateMaxField = document.getElementById("rateMaxField");
+      rateMinField.classList.remove("has-error");
+      rateMaxField.classList.remove("has-error");
+
+      // 希望単価・最低単価は必須項目。ディレクターの要望により、
+      // 両方とも入力されていない場合は保存を許可しない。
+      if (payload.desired_rate_min === null || payload.desired_rate_max === null) {
+        if (payload.desired_rate_min === null) {
+          rateMinField.classList.add("has-error");
+          document.getElementById("rateMin").focus();
+        } else {
+          rateMaxField.classList.add("has-error");
+          document.getElementById("rateMax").focus();
+        }
+        return;
+      }
+
+      // フロント側バリデーション：DBのCHECK制約 chk_instructor_profiles_rate_order
+      // (desired_rate_min <= desired_rate_max) と同じ条件を、送信前にここで検証する。
+      // 最低単価（desired_rate_min）は希望単価（desired_rate_max）以下でなければならない。
+      if (
+        payload.desired_rate_min !== null &&
+        payload.desired_rate_max !== null &&
+        payload.desired_rate_min > payload.desired_rate_max
+      ) {
+        errorBanner.textContent = "最低単価は希望単価以下の金額にしてください。";
+        errorBanner.classList.add("is-visible");
+        document.getElementById("rateMin").focus();
+        return;
+      }
+
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = "保存中…";
+
+      // 専門分野の新規スキルをDBに反映する（training_categories/training_subcategories は
+      // 依頼投稿画面・講師検索画面などサイト全体で共有されるマスタデータのため、
+      // 同名スキルが既にあればそれを再利用し、重複作成を防ぐ）。
+      const newlyResolvedIds = [];
+      for (const item of newSkillItems) {
+        const { data: existingSc, error: findError } = await supabaseClient
+          .from("training_subcategories")
+          .select("id")
+          .eq("category_id", item.categoryId)
+          .ilike("name", item.name)
+          .maybeSingle();
+
+        if (findError) {
+          console.error("subcategory lookup error:", findError);
+          submitBtn.disabled = false;
+          submitBtn.textContent = "保存する";
+          errorBanner.textContent = "新しいスキルの登録に失敗しました。もう一度お試しください。";
+          errorBanner.classList.add("is-visible");
+          return;
+        }
+
+        if (existingSc) {
+          newlyResolvedIds.push(existingSc.id);
+          continue;
+        }
+
+        // training_subcategories.sort_order は NOT NULL のため、同じカテゴリ内の
+        // 最大値+1を計算してから登録する（既存の並び順を崩さず末尾に追加される）。
+        const { data: maxRow } = await supabaseClient
+          .from("training_subcategories")
+          .select("sort_order")
+          .eq("category_id", item.categoryId)
+          .order("sort_order", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const nextSortOrder = (maxRow?.sort_order || 0) + 1;
+
+        const { data: createdSc, error: createError } = await supabaseClient
+          .from("training_subcategories")
+          .insert({ category_id: item.categoryId, name: item.name, sort_order: nextSortOrder })
+          .select("id")
+          .single();
+
+        if (createError) {
+          console.error("subcategory create error:", createError);
+          submitBtn.disabled = false;
+          submitBtn.textContent = "保存する";
+          errorBanner.textContent = "新しいスキルの登録に失敗しました。もう一度お試しください。";
+          errorBanner.classList.add("is-visible");
+          return;
+        }
+        newlyResolvedIds.push(createdSc.id);
+      }
+
+      const selectedSubcategoryIds = [...existingSubcategoryIds, ...newlyResolvedIds];
+
+      const { error } = await supabaseClient
+        .from("instructor_profiles")
+        .upsert(payload, { onConflict: "id" });
+
+      // 専門分野は「全削除 → 選択分を再登録」で置き換える（シンプルで確実）。
+      // 以前はここのエラーを一切拾っておらず、DELETE/INSERTが失敗しても
+      // 「保存しました」と表示されてしまうサイレント失敗バグがあったため、
+      // expertiseError として明示的に捕捉し、下の判定に含める。
+      let expertiseError = null;
+      if (!error) {
+        const { error: deleteError } = await supabaseClient
+          .from("instructor_expertise")
+          .delete()
+          .eq("instructor_id", user.id);
+        if (deleteError) {
+          expertiseError = deleteError;
+        } else if (selectedSubcategoryIds.length) {
+          const rows = selectedSubcategoryIds.map(subcategory_id => ({ instructor_id: user.id, subcategory_id }));
+          const { error: insertError } = await supabaseClient.from("instructor_expertise").insert(rows);
+          if (insertError) expertiseError = insertError;
+        }
+      }
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = "保存する";
+
+      const saveError = error || expertiseError;
+      if (saveError) {
+        console.error("profile save error:", saveError); // デバッグ用に開発者コンソールには生エラーを残す
+        errorBanner.textContent = friendlyErrorMessage(saveError);
+        errorBanner.classList.add("is-visible");
+        return;
+      }
+
+      showToast("プロフィールを保存しました");
+      setTimeout(() => { window.location.href = "mypage.html"; }, 700);
+    });
+  }
+
+  async function renderExpertiseGroup(instructorId) {
+    const groupEl = document.getElementById("expertiseGroup");
+
+    const { data: categories, error: catError } = await supabaseClient
+      .from("training_categories")
+      .select("id, name, training_subcategories(id, name)")
+      .order("sort_order");
+
+    if (catError || !categories) {
+      groupEl.innerHTML = `<p style="font-size:12.5px; color:var(--color-danger);">分野データの読み込みに失敗しました。</p>`;
+      return;
+    }
+
+    const { data: selectedRows } = await supabaseClient
+      .from("instructor_expertise")
+      .select("subcategory_id")
+      .eq("instructor_id", instructorId);
+    const selectedIds = new Set((selectedRows || []).map(r => r.subcategory_id));
+
+    groupEl.innerHTML = categories.map(cat => `
+      <div>
+        <p style="font-size:12.5px; font-weight:700; margin:0 0 6px;">${cat.name}</p>
+        <div class="expertise-checks" data-category-id="${cat.id}" style="display:flex; flex-wrap:wrap; gap:8px;">
+          ${(cat.training_subcategories || []).map(sc => `
+            <label style="display:flex; align-items:center; gap:5px; font-size:12.5px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-pill); padding:5px 12px; cursor:pointer;">
+              <input type="checkbox" value="${sc.id}" style="width:auto;" ${selectedIds.has(sc.id) ? "checked" : ""}>
+              ${escapeHtml(sc.name)}
+            </label>
+          `).join("")}
+        </div>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <input type="text" class="expertise-new-input" data-category-id="${cat.id}" placeholder="新しいスキル名を入力（例：〇〇研修）" maxlength="50" style="flex:1; padding:7px 10px; font-size:12.5px; border:1px solid var(--color-border); border-radius:var(--radius-s); background:var(--color-surface);">
+          <button type="button" class="btn btn--ghost btn--sm expertise-add-btn" data-category-id="${cat.id}">追加</button>
+        </div>
+      </div>
+    `).join("");
+
+    // 「専門分野に追加」ボタン：新しいスキル名を checkbox として即座に画面に反映する。
+    // DBへの実際の登録（training_subcategoriesへのinsert）は保存ボタン押下時にまとめて行う
+    // （途中で離脱した場合に空のカテゴリだけ残ってしまうのを防ぐため）。
+    groupEl.querySelectorAll(".expertise-add-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const catId = btn.dataset.categoryId;
+        const input = groupEl.querySelector(`.expertise-new-input[data-category-id="${catId}"]`);
+        const name = input.value.trim();
+        if (!name) {
+          input.focus();
+          return;
+        }
+
+        const checksEl = groupEl.querySelector(`.expertise-checks[data-category-id="${catId}"]`);
+
+        // 同じカテゴリ内に同名（大文字小文字区別なし）のスキルが既にあれば、
+        // 重複追加せずそのチェックボックスをONにするだけにする。
+        const existingLabels = [...checksEl.querySelectorAll("label")];
+        const dup = existingLabels.find(l => l.textContent.trim().toLowerCase() === name.toLowerCase());
+        if (dup) {
+          dup.querySelector("input").checked = true;
+          input.value = "";
+          return;
+        }
+
+        const label = document.createElement("label");
+        label.style.cssText = "display:flex; align-items:center; gap:5px; font-size:12.5px; background:var(--color-primary-soft, var(--color-bg)); border:1px solid var(--color-primary); border-radius:var(--radius-pill); padding:5px 12px; cursor:pointer;";
+        label.innerHTML = `<input type="checkbox" value="NEW::${catId}::${encodeURIComponent(name)}" checked style="width:auto;"> ${escapeHtml(name)}<span style="font-size:10.5px; color:var(--color-primary); font-weight:700;">NEW</span>`;
+        checksEl.appendChild(label);
+        input.value = "";
+        input.focus();
+      });
+    });
+
+    // Enterキーでも追加できるようにする
+    groupEl.querySelectorAll(".expertise-new-input").forEach(input => {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          groupEl.querySelector(`.expertise-add-btn[data-category-id="${input.dataset.categoryId}"]`).click();
+        }
+      });
+    });
+  }
+
+  init();
+</script>
+</body>
+</html>

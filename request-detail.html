@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>依頼の詳細 | ケンシュウリンク</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-active-nav="open-requests.html" data-role-theme="instructor">
+
+<div id="site-header"></div>
+
+<main class="detail-page" id="detailMain" style="max-width:760px;">
+  <!-- JSで動的に描画 -->
+</main>
+
+<div id="site-footer"></div>
+
+<!-- ===================== モーダル：ログインゲート ===================== -->
+<div class="modal-overlay" id="loginGateModal">
+  <div class="modal-box" style="max-width:420px; text-align:center;">
+    <button type="button" class="modal-close" id="closeLoginGate" aria-label="閉じる">×</button>
+    <span class="hanko hanko--logo login-gate__icon" style="margin:0 auto 16px;">研</span>
+    <p class="modal-title" id="loginGateTitle">ログインが必要です</p>
+    <p class="modal-desc" id="loginGateDesc">依頼に応募するには、講師アカウントでログインしてください。</p>
+    <div class="form-actions" style="flex-direction:column;">
+      <a href="login.html" class="btn btn--primary btn--block">ログイン</a>
+      <a href="register.html" class="btn btn--ghost btn--block">新規登録</a>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/supabase-client.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/layout.js"></script>
+<script>
+  const FORMAT_LABEL = { online: "オンライン", offline: "対面", both: "オンライン・対面" };
+  const requestId = new URLSearchParams(location.search).get("id");
+  const focusRespond = new URLSearchParams(location.search).get("focus") === "respond";
+
+  // XSS対策: DBから来た値（title/description/location等、ユーザー入力由来）を
+  // innerHTML に差し込む前に必ずこの関数を通す。このページは未ログインでも
+  // 閲覧できるため、影響範囲がログイン済みユーザーだけに留まらない点に注意。
+  function escapeHtml(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+  }
+
+  function openLoginGateModal() {
+    document.getElementById("loginGateModal").classList.add("is-open");
+  }
+
+  function tagsHtml(r) {
+    return `
+      <div class="request-card__tags" style="margin:18px 0;">
+        <span class="instructor-card__tag">${FORMAT_LABEL[r.preferred_format] || escapeHtml(r.preferred_format)}</span>
+        ${r.budget ? `<span class="instructor-card__tag">予算 ¥${Number(r.budget).toLocaleString()}</span>` : ""}
+        ${r.location ? `<span class="instructor-card__tag">${escapeHtml(r.location)}</span>` : ""}
+        ${r.preferred_schedule ? `<span class="instructor-card__tag">${escapeHtml(r.preferred_schedule)}</span>` : ""}
+      </div>
+    `;
+  }
+
+  function notFound() {
+    document.getElementById("detailMain").innerHTML = `
+      <div class="empty-state" style="padding-top:80px;">
+        <p class="empty-state__title">依頼が見つかりませんでした</p>
+        <p class="empty-state__desc">削除されたか、公募が終了している可能性があります。</p>
+        <a href="open-requests.html" class="btn btn--primary" style="margin-top:16px;">一覧に戻る</a>
+      </div>
+    `;
+  }
+
+  /* --- 未ログイン：基本情報だけのプレビュー（連絡先・応募操作なし） --- */
+  async function renderPublicDetail() {
+    if (!requestId) { notFound(); return; }
+
+    const { data: r, error } = await supabaseClient
+      .from("open_requests_public_preview")
+      .select("*")
+      .eq("request_id", requestId)
+      .maybeSingle();
+
+    if (error || !r) { notFound(); return; }
+
+    document.getElementById("detailMain").innerHTML = `
+      <a href="open-requests.html" class="breadcrumb">← 一覧に戻る</a>
+      <div class="request-card">
+        <div class="request-card__top">
+          <div>
+            <div class="request-card__title" style="font-size:20px;">${escapeHtml(r.title)}</div>
+            <div class="request-card__meta">
+              <span>${r.requester_type === "company" ? "企業" : "生徒"}からの公募</span>
+              <span>${fmtDate(r.created_at)}</span>
+            </div>
+          </div>
+          <span class="status-badge status-badge--pending">募集中</span>
+        </div>
+        ${tagsHtml(r)}
+        <p class="request-card__desc" style="white-space:pre-wrap;">${escapeHtml(r.description)}</p>
+        <div class="request-card__actions" style="margin-top:24px;">
+          <button type="button" class="btn btn--primary" id="previewLoginBtn">ログインして応募する</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("previewLoginBtn").addEventListener("click", openLoginGateModal);
+  }
+
+  function renderGate(kind) {
+    const main = document.getElementById("detailMain");
+    if (kind === "not-instructor") {
+      main.innerHTML = `
+        <div class="empty-state" style="padding-top:80px;">
+          <p class="empty-state__title">講師アカウントのみご利用いただけます</p>
+          <p class="empty-state__desc">公募中の依頼への応募は、講師アカウントでログインした場合のみ利用できます。</p>
+          <a href="mypage.html" class="btn btn--primary" style="margin-top:16px;">マイページに戻る</a>
+        </div>
+      `;
+    }
+  }
+
+  function displayStatus(r) {
+    if (r.status === "completed") return { key: "completed", label: "完了" };
+    if (r.status === "accepted") {
+      return r.myResponse?.is_selected
+        ? { key: "selected", label: "あなたに決定" }
+        : { key: "not-selected", label: "応募終了" };
+    }
+    if (r.myResponse) {
+      if (r.myResponse.action === "reject" || r.myResponse.action === "withdrawn") return { key: "rejected", label: "却下済み" };
+      return { key: "quoted", label: "返信済み（依頼者の確定待ち）" };
+    }
+    return { key: "pending", label: "募集中" };
+  }
+
+  let user = null;
+
+  /* --- ログイン済み講師：詳細情報 + 全アクションボタン --- */
+  async function renderInstructorDetail() {
+    if (!requestId) { notFound(); return; }
+
+    const { data: r, error } = await supabaseClient
+      .from("training_requests")
+      .select("*, instructor_responses(*), training_reviews(*)")
+      .eq("request_id", requestId)
+      .maybeSingle();
+
+    if (error || !r) { notFound(); return; }
+
+    r.myResponse = (r.instructor_responses || []).find(x => x.instructor_id === user.id) || null;
+    const st = displayStatus(r);
+
+    let requesterInfo = null;
+    if (st.key === "selected") {
+      const { data: ru } = await supabaseClient.from("users").select("id, name, email").eq("id", r.requester_id).maybeSingle();
+      const { data: rp } = await supabaseClient.from("requester_profiles").select("*").eq("id", r.requester_id).maybeSingle();
+      requesterInfo = { ...ru, ...rp };
+    }
+
+    document.getElementById("detailMain").innerHTML = `
+      <a href="open-requests.html" class="breadcrumb">← 一覧に戻る</a>
+      <div class="request-card">
+        <div class="request-card__top">
+          <div>
+            <div class="request-card__title" style="font-size:20px;">${escapeHtml(r.title)}</div>
+            <div class="request-card__meta">
+              <span>${r.requester_type === "company" ? "企業" : "生徒"}からの公募</span>
+              <span>${fmtDate(r.created_at)}</span>
+            </div>
+          </div>
+          <span class="status-badge status-badge--${st.key === "quoted" ? "quoted" : st.key === "rejected" ? "rejected" : st.key === "not-selected" ? "rejected" : st.key === "selected" ? "accepted" : st.key}">${st.label}</span>
+        </div>
+        ${tagsHtml(r)}
+        <p class="request-card__desc" style="white-space:pre-wrap;">${escapeHtml(r.description)}</p>
+
+        ${r.myResponse ? `
+          <div class="request-card__response" style="margin-top:20px;">
+            <strong>あなたの対応：${r.myResponse.action === "accept" ? "承諾" : r.myResponse.action === "quote" ? `見積り ¥${Number(r.myResponse.quote_price || 0).toLocaleString()}` : "却下"}</strong>
+            ${r.myResponse.message ? escapeHtml(r.myResponse.message) : "（メッセージなし）"}
+          </div>
+        ` : ""}
+
+        ${!r.myResponse && r.status === "pending" ? `
+          <div class="request-card__actions" id="actionButtons" style="margin-top:24px;">
+            <button type="button" class="btn btn--primary btn--sm" data-action="accept">承諾する</button>
+            <button type="button" class="btn btn--ghost btn--sm" data-action="quote-toggle">見積りを送る</button>
+            <button type="button" class="btn btn--danger btn--sm" data-action="reject">興味なし（却下）</button>
+            <button type="button" class="btn btn--ghost btn--sm" data-action="hide">この依頼を非表示にする</button>
+          </div>
+          <div class="inline-quote-form" data-quote-form>
+            <div class="form-field">
+              <label>見積り金額（時間あたり）</label>
+              <input type="number" min="0" step="1000" placeholder="例：14000" data-quote-price>
+            </div>
+            <div class="form-field">
+              <label>メッセージ</label>
+              <textarea rows="2" placeholder="見積りの補足があればご記入ください" data-quote-message></textarea>
+            </div>
+            <button type="button" class="btn btn--primary btn--sm" data-action="quote-submit">この内容で見積りを送る</button>
+          </div>
+        ` : ""}
+
+        ${st.key === "selected" ? `
+          <div class="contact-box" style="margin-top:20px;">
+            <strong>連絡先：</strong>
+            ${requesterInfo ? `
+              <div>${requesterInfo.company_name ? "会社名：" + escapeHtml(requesterInfo.company_name) : "担当者：" + escapeHtml(requesterInfo.name)}</div>
+              <div>メール：${escapeHtml(requesterInfo.email)}</div>
+              <div>電話番号：${escapeHtml(requesterInfo.phone) || "未登録"}</div>
+            ` : "読み込み中…"}
+          </div>
+          <p class="request-card__desc" style="color:var(--color-ink-soft); margin-top:12px;">この依頼はあなたに決定しました。マイページの「受け取った依頼」からは表示されないため、進捗はこのページで確認してください。</p>
+        ` : ""}
+      </div>
+    `;
+
+    // 「この依頼を非表示にする」は一覧側の localStorage を共有する仕組みのため、
+    // ここでも同じキーに保存する（open-requests.html の HIDDEN_KEY と同一）。
+    const HIDDEN_KEY = "kenshulink_hidden_open_requests";
+    function hideRequest(id) {
+      let ids = [];
+      try { ids = JSON.parse(localStorage.getItem(HIDDEN_KEY)) || []; } catch {}
+      if (!ids.includes(id)) ids.push(id);
+      localStorage.setItem(HIDDEN_KEY, JSON.stringify(ids));
+    }
+
+    document.querySelector('[data-action="hide"]')?.addEventListener("click", () => {
+      hideRequest(requestId);
+      showToast("この依頼を非表示にしました。");
+      setTimeout(() => { window.location.href = "open-requests.html"; }, 700);
+    });
+
+    document.querySelector('[data-action="accept"]')?.addEventListener("click", async () => {
+      const { error } = await supabaseClient.from("instructor_responses").insert({ request_id: requestId, instructor_id: user.id, action: "accept" });
+      if (error) { showToast(`エラー：${error.message}`); return; }
+      showToast("依頼を承諾しました。依頼者の確定操作をお待ちください。");
+      renderInstructorDetail();
+    });
+
+    document.querySelector('[data-action="reject"]')?.addEventListener("click", async () => {
+      const { error } = await supabaseClient.from("instructor_responses").insert({ request_id: requestId, instructor_id: user.id, action: "reject" });
+      if (error) { showToast(`エラー：${error.message}`); return; }
+      showToast("この依頼を却下しました。");
+      renderInstructorDetail();
+    });
+
+    document.querySelector('[data-action="quote-toggle"]')?.addEventListener("click", () => {
+      document.querySelector("[data-quote-form]").classList.toggle("is-open");
+    });
+
+    document.querySelector('[data-action="quote-submit"]')?.addEventListener("click", async () => {
+      const price = Number(document.querySelector("[data-quote-price]").value) || null;
+      const message = document.querySelector("[data-quote-message]").value.trim() || null;
+      if (!price) { showToast("見積り金額を入力してください"); return; }
+      const { error } = await supabaseClient.from("instructor_responses").insert({ request_id: requestId, instructor_id: user.id, action: "quote", quote_price: price, message });
+      if (error) { showToast(`エラー：${error.message}`); return; }
+      showToast("見積りを送信しました。");
+      renderInstructorDetail();
+    });
+
+    // 「応募する」ボタンから来た場合（focus=respond）は見積りフォームまで自動スクロール
+    if (focusRespond) {
+      const actionButtons = document.getElementById("actionButtons");
+      actionButtons?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  async function main() {
+    document.getElementById("closeLoginGate")?.addEventListener("click", () => {
+      document.getElementById("loginGateModal").classList.remove("is-open");
+    });
+    document.getElementById("loginGateModal")?.addEventListener("click", (e) => {
+      if (e.target.id === "loginGateModal") e.target.classList.remove("is-open");
+    });
+
+    if (!authReady) {
+      await new Promise(resolve => document.addEventListener("kenshulink:authchange", resolve, { once: true }));
+    }
+    user = getCurrentUser();
+
+    if (!user) { await renderPublicDetail(); return; }
+    if (user.role === "INSTRUCTOR") { await renderInstructorDetail(); return; }
+    await renderOwnerDetailOrGate();
+  }
+
+  /* --- 企業／個人：自分が投稿した依頼のみ、詳細＋おすすめ講師を表示 --- */
+  async function renderOwnerDetailOrGate() {
+    if (!requestId) { notFound(); return; }
+    const { data: r, error } = await supabaseClient
+      .from("training_requests")
+      .select("*, instructor_responses(*)")
+      .eq("request_id", requestId)
+      .maybeSingle();
+
+    if (error || !r) { notFound(); return; }
+    if (r.requester_id !== user.id) { renderGate("not-instructor"); return; }
+
+    document.getElementById("detailMain").innerHTML = `
+      <a href="mypage.html" class="breadcrumb">← マイページに戻る</a>
+      <div class="request-card">
+        <div class="request-card__top">
+          <div>
+            <div class="request-card__title" style="font-size:20px;">${escapeHtml(r.title)}</div>
+            <div class="request-card__meta"><span>${fmtDate(r.created_at)}</span></div>
+          </div>
+        </div>
+        ${tagsHtml(r)}
+        <p class="request-card__desc" style="white-space:pre-wrap;">${escapeHtml(r.description)}</p>
+        <p class="request-card__desc" style="color:var(--color-ink-soft);">応募件数：${(r.instructor_responses || []).length}件</p>
+      </div>
+
+      <div style="margin-top:28px;">
+        <h2 class="section__title" style="font-size:16px;">この依頼に合いそうな講師</h2>
+        <div id="matchedInstructors" style="margin-top:12px;"><p style="color:var(--color-ink-soft); font-size:13px;">読み込み中…</p></div>
+      </div>
+    `;
+
+    await renderMatchedInstructorsForRequest(r);
+  }
+
+  async function renderMatchedInstructorsForRequest(r) {
+    const el = document.getElementById("matchedInstructors");
+    if (!el) return;
+
+    const { data: instructors, error } = await supabaseClient
+      .from("instructor_public_directory")
+      .select("id, name, work_style, desired_rate_min, rating_avg, prefectures, self_pr");
+    if (error || !instructors) {
+      el.innerHTML = `<p style="color:var(--color-danger); font-size:13px;">読み込みに失敗しました。</p>`;
+      return;
+    }
+
+    let expertiseMatchIds = new Set();
+    if (r.expertise_field) {
+      const { data: expRows } = await supabaseClient
+        .from("instructor_expertise")
+        .select("instructor_id")
+        .eq("subcategory_id", r.expertise_field);
+      expertiseMatchIds = new Set((expRows || []).map(x => x.instructor_id));
+    }
+
+    function reasonsFor(ins) {
+      const reasons = [];
+      if (expertiseMatchIds.has(ins.id)) reasons.push("分野");
+      const formatOk =
+        r.preferred_format === "both" ||
+        (r.preferred_format === "online" && (ins.work_style === "ONLINE" || ins.work_style === "HYBRID")) ||
+        (r.preferred_format === "offline" && (ins.work_style === "ONSITE" || ins.work_style === "HYBRID"));
+      if (formatOk) reasons.push("形態");
+      if (r.budget != null && ins.desired_rate_min != null && ins.desired_rate_min <= r.budget) reasons.push("予算");
+      return reasons;
+    }
+
+    // 分野が合致していれば無条件でヒット。分野が合致しない場合は、
+    // 形態・予算のうち2つ以上合致していればヒットとする（open-requests.htmlの講師側判定と同じ基準）。
+    function isRecommended(reasons) {
+      return reasons.includes("分野") || reasons.length >= 2;
+    }
+
+    const matched = instructors
+      .map(ins => ({ ins, reasons: reasonsFor(ins) }))
+      .filter(x => x.reasons.length > 0)
+      .sort((a, b) => {
+        const strongDiff = (isRecommended(b.reasons) ? 1 : 0) - (isRecommended(a.reasons) ? 1 : 0);
+        if (strongDiff !== 0) return strongDiff;
+        return b.reasons.length - a.reasons.length;
+      })
+      .slice(0, 6);
+
+    if (matched.length === 0) {
+      el.innerHTML = `<p style="color:var(--color-ink-soft); font-size:13px;">現在、条件に合う講師が見つかりませんでした。</p>`;
+      return;
+    }
+
+    el.innerHTML = matched.map(({ ins, reasons }) => `
+      <a href="instructor-detail.html?id=${ins.id}" style="display:block; margin-bottom:10px;">
+        <div class="request-card">
+          <div class="request-card__top">
+            <div>
+              <div class="request-card__title">${escapeHtml(ins.name || "（名前未設定）")}</div>
+              <div class="request-card__meta"><span>${(ins.prefectures || []).join("、") || "エリア未設定"}</span></div>
+            </div>
+            <span class="status-badge status-badge--accepted">★ ${ins.rating_avg != null ? Number(ins.rating_avg).toFixed(1) : "-"}</span>
+          </div>
+          <div class="notice-banner ${isRecommended(reasons) ? "is-visible" : ""}" style="margin:8px 0; font-size:12px; ${isRecommended(reasons) ? "" : "opacity:.65; background:var(--color-bg);"}">${reasons.join("・")}が合致</div>
+          <p class="request-card__desc">${escapeHtml(ins.self_pr || "自己紹介は未登録です。")}</p>
+        </div>
+      </a>
+    `).join("");
+  }
+
+  main();
+</script>
+</body>
+</html>

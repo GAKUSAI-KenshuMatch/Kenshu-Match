@@ -1,0 +1,11 @@
+# Node
+node_modules/
+package-lock.json
+
+# Biến môi trường (nếu sau này bạn thêm file .env chứa key nhạy cảm)
+.env
+.env.local
+
+# Hệ điều hành
+.DS_Store
+Thumbs.db

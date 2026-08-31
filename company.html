@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>運営会社 | ケンシュウリンク</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .company-table {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+  .company-row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 16px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .company-row:last-child { border-bottom: none; }
+  .company-row dt { font-size: 13px; font-weight: 700; color: var(--color-ink); }
+  .company-row dd { margin: 0; font-size: 13.5px; color: var(--color-ink-soft); }
+  @media (max-width: 560px) {
+    .company-row { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+</head>
+<body data-active-nav="">
+
+<div id="site-header"></div>
+
+<main class="detail-page" style="max-width:760px;">
+  <p class="section__eyebrow">COMPANY</p>
+  <h1 class="hero-band__title" style="font-size:26px; margin-bottom:24px;">会社概要</h1>
+
+  <dl class="company-table">
+    <div class="company-row">
+      <dt>会社名</dt>
+      <dd>株式会社GAKUSAI</dd>
+    </div>
+    <div class="company-row">
+      <dt>設立</dt>
+      <dd>2023年3月16日</dd>
+    </div>
+    <div class="company-row">
+      <dt>代表者</dt>
+      <dd>代表取締役　前田 美香</dd>
+    </div>
+    <div class="company-row">
+      <dt>資本金</dt>
+      <dd>6,300万円</dd>
+    </div>
+    <div class="company-row">
+      <dt>事業内容</dt>
+      <dd>研修事業・産学連携事業・事業支援事業・人材支援事業・有料職業紹介事業（13-ユ-315843）・労働者派遣事業（派13-316932）</dd>
+    </div>
+    <div class="company-row">
+      <dt>所在地</dt>
+      <dd>東京都中央区新川1−6−11　ニューリバータワーB1</dd>
+    </div>
+    <div class="company-row">
+      <dt>連絡先</dt>
+      <dd>03-5244-9450</dd>
+    </div>
+  </dl>
+
+  <p style="font-size:11.5px; color:var(--color-ink-soft); margin-top:16px;">研修講師マッチングプラットフォーム「ケンシュウリンク」は、株式会社GAKUSAIが企画・開発・運営しています。</p>
+</main>
+
+<div id="site-footer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="assets/supabase-client.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/layout.js"></script>
+</body>
+</html>
