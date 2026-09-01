@@ -53,7 +53,7 @@ export type InstructorProfileRow = {
   work_style: WorkStyle | null;
   desired_rate_min: number | null;
   desired_rate_max: number | null;
-  certifications: string | null;
+  certifications: string[] | null;
   portfolio_url: string | null;
   avatar_url: string | null;
   contact_email: string | null;
@@ -140,7 +140,9 @@ export type InstructorPublicDirectoryRow = {
   rating_avg: number | null;
   review_count: number | null;
   self_pr: string | null;
-  certifications: string | null;
+  certifications: string[] | null;
+  portfolio_url: string | null;
+  avatar_url: string | null;
   years_of_experience: number | null;
   is_featured: boolean | null;
 };

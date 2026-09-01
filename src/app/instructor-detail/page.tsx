@@ -30,6 +30,8 @@ interface DisplayInstructor {
   ratingAvg: number;
   reviewCount: number;
   introduction: string;
+  avatarUrl?: string | null;
+  portfolioUrl?: string | null;
 }
 interface DisplayReview {
   reviewerName: string;
@@ -54,7 +56,7 @@ function InstructorDetailInner() {
   const isRealId = UUID_RE.test(rawId);
 
   const [instructor, setInstructor] = useState<DisplayInstructor | null>(null);
-  const [detail, setDetail] = useState<{ bio?: string | null; certifications?: string | null; availableSchedule?: string | null }>({});
+  const [detail, setDetail] = useState<{ bio?: string | null; certifications?: string[] | null; availableSchedule?: string | null }>({});
   const [reviews, setReviews] = useState<DisplayReview[]>([]);
   const [notFound, setNotFound] = useState(false);
 
@@ -100,6 +102,8 @@ function InstructorDetailInner() {
           ratingAvg: p.rating_avg != null ? Number(p.rating_avg) : 0,
           reviewCount: 0,
           introduction: p.self_pr || "自己紹介はまだ登録されていません。",
+          avatarUrl: p.avatar_url || null,
+          portfolioUrl: p.portfolio_url || null,
         });
         setDetail({ bio: p.self_pr, certifications: p.certifications, availableSchedule: null });
 
@@ -128,6 +132,8 @@ function InstructorDetailInner() {
           ratingAvg: mock.ratingAvg,
           reviewCount: mock.reviewCount,
           introduction: mock.introduction,
+          avatarUrl: null,
+          portfolioUrl: null,
         });
         setDetail(INSTRUCTOR_DETAILS[mock.id] || {});
         setReviews(MOCK_REVIEWS[mock.id] || []);
@@ -257,7 +263,16 @@ function InstructorDetailInner() {
       <div className="detail-layout">
         <div>
           <div className="detail-header">
-            <span className="detail-header__avatar">{instructor.initial}</span>
+            {instructor.avatarUrl ? (
+              <img
+                src={instructor.avatarUrl}
+                alt={`${instructor.name}のプロフィール画像`}
+                className="detail-header__avatar"
+                style={{ objectFit: "cover" }}
+              />
+            ) : (
+              <span className="detail-header__avatar">{instructor.initial}</span>
+            )}
             <div>
               <h1 className="detail-header__name">{instructor.name}</h1>
               <div className="detail-header__meta">
@@ -295,12 +310,22 @@ function InstructorDetailInner() {
               </div>
               <div>
                 <dt>保有資格</dt>
-                <dd>{detail.certifications || "-"}</dd>
+                <dd>{detail.certifications && detail.certifications.length ? detail.certifications.join("、") : "-"}</dd>
               </div>
               <div>
                 <dt>対応可能日程</dt>
                 <dd>{detail.availableSchedule || "要相談"}</dd>
               </div>
+              {instructor.portfolioUrl && (
+                <div>
+                  <dt>ポートフォリオ／実績</dt>
+                  <dd>
+                    <a href={instructor.portfolioUrl} target="_blank" rel="noopener noreferrer">
+                      {instructor.portfolioUrl}
+                    </a>
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
 

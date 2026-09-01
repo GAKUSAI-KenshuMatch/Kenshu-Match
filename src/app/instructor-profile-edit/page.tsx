@@ -59,7 +59,8 @@ export default function InstructorProfileEditPage() {
   const [selfPr, setSelfPr] = useState("");
   const [rateMax, setRateMax] = useState("");
   const [rateMin, setRateMin] = useState("");
-  const [certifications, setCertifications] = useState("");
+  const [certifications, setCertifications] = useState<string[]>([]);
+  const [certificationInput, setCertificationInput] = useState("");
   const [portfolioUrl, setPortfolioUrl] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -96,7 +97,7 @@ export default function InstructorProfileEditPage() {
         setSelfPr(profile.self_pr || "");
         setRateMax(profile.desired_rate_max != null ? String(profile.desired_rate_max) : "");
         setRateMin(profile.desired_rate_min != null ? String(profile.desired_rate_min) : "");
-        setCertifications(profile.certifications || "");
+        setCertifications(profile.certifications || []);
         setPortfolioUrl(profile.portfolio_url || "");
         setAvatarUrl(profile.avatar_url || "");
         setContactEmail(profile.contact_email || "");
@@ -158,6 +159,21 @@ export default function InstructorProfileEditPage() {
     setNewSkillInputs((prev) => ({ ...prev, [categoryId]: "" }));
   }
 
+  function addCertification() {
+    const name = certificationInput.trim();
+    if (!name) return;
+    if (certifications.some((c) => c.toLowerCase() === name.toLowerCase())) {
+      setCertificationInput("");
+      return;
+    }
+    setCertifications((prev) => [...prev, name]);
+    setCertificationInput("");
+  }
+
+  function removeCertification(name: string) {
+    setCertifications((prev) => prev.filter((c) => c !== name));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
@@ -208,7 +224,7 @@ export default function InstructorProfileEditPage() {
       self_pr: selfPr.trim() || null,
       desired_rate_min: desiredRateMin,
       desired_rate_max: desiredRateMax,
-      certifications: certifications.trim() || null,
+      certifications: certifications.length ? certifications : null,
       portfolio_url: portfolioUrl.trim() || null,
       avatar_url: avatarUrl.trim() || null,
       contact_email: contactEmail.trim() || null,
@@ -378,13 +394,51 @@ export default function InstructorProfileEditPage() {
 
             <div className="form-field">
               <label htmlFor="certifications">保有資格</label>
-              <input
-                type="text"
-                id="certifications"
-                placeholder="例：基本情報技術者試験"
-                value={certifications}
-                onChange={(e) => setCertifications(e.target.value)}
-              />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {certifications.map((c) => (
+                  <span
+                    key={c}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12.5,
+                      background: "var(--color-bg)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "var(--radius-pill)",
+                      padding: "5px 12px",
+                    }}
+                  >
+                    {c}
+                    <button
+                      type="button"
+                      onClick={() => removeCertification(c)}
+                      style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-ink-soft)", fontSize: 13, lineHeight: 1, padding: 0 }}
+                      aria-label={`${c}を削除`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  type="text"
+                  id="certifications"
+                  placeholder="例：基本情報技術者試験"
+                  value={certificationInput}
+                  onChange={(e) => setCertificationInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCertification();
+                    }
+                  }}
+                />
+                <button type="button" className="btn btn--ghost btn--sm" onClick={addCertification}>
+                  追加
+                </button>
+              </div>
             </div>
 
             <div className="form-field">

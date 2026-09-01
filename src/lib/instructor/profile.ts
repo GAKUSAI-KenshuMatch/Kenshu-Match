@@ -43,7 +43,7 @@ export interface EditableInstructorProfileFields {
   work_style?: WorkStyle | null;
   desired_rate_min?: number | null;
   desired_rate_max?: number | null;
-  certifications?: string | null;
+  certifications?: string[] | null;
   portfolio_url?: string | null;
   avatar_url?: string | null;
   contact_email?: string | null;
