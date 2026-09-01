@@ -10,10 +10,11 @@ import {
   getOpenRequestPublicDetail,
   getTrainingRequestDetail,
   getTrainingRequestWithResponses,
-  submitInstructorResponse,
-} from "@/services/requests";
-import { getRequesterContacts } from "@/services/profiles";
-import { getMatchingCandidateInstructors, getInstructorExpertiseInstructorIds } from "@/services/instructors";
+} from "@/lib/requests/training-requests";
+import { submitInstructorResponse } from "@/lib/requests/instructor-responses";
+import { getRequesterContacts } from "@/lib/requester/profile";
+import { getMatchingCandidateInstructors } from "@/lib/instructor/profile";
+import { getInstructorExpertiseInstructorIds } from "@/lib/instructor/expertise";
 import type {
   InstructorPublicDirectoryRow,
   InstructorResponseRow,

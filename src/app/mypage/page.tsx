@@ -5,22 +5,23 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/common/Toast";
 import { useRoleTheme } from "@/hooks/useRoleTheme";
-import { getInstructorProfileSummary, getRequesterProfile, getInstructorContacts, getRequesterContacts } from "@/services/profiles";
-import { getInstructorNames } from "@/services/instructors";
+import { getInstructorProfileSummary, getInstructorContacts, getInstructorNames } from "@/lib/instructor/profile";
+import { getRequesterProfile, getRequesterContacts } from "@/lib/requester/profile";
 import {
   getRequestsForInstructor,
   getRequestsForRequester,
+  cancelRequest,
+  completeRequest,
+} from "@/lib/requests/training-requests";
+import {
   countUnseenNotSelectedResults,
   markResponsesSeenByRequester,
   submitInstructorResponse,
-  finalizeResponse,
-  cancelRequest,
-  completeRequest,
-  submitReview,
-  replyToReview,
-} from "@/services/requests";
+} from "@/lib/requests/instructor-responses";
+import { submitReview, replyToReview } from "@/lib/requests/reviews";
+import { finalizeResponse } from "@/lib/requests/actions";
 import type { InstructorResponseRow, TrainingRequestRow, TrainingReviewRow } from "@/types/database";
-import type { CurrentUser } from "@/services/auth";
+import type { CurrentUser } from "@/lib/auth/auth";
 import "./mypage.css";
 
 const FORMAT_LABEL: Record<string, string> = { online: "オンライン", offline: "対面", both: "オンライン・対面" };
@@ -473,7 +474,7 @@ function RequesterRequestCard({
 
   async function finalize(responseId: string, instructorId: string) {
     setBusy(true);
-    const { error } = await finalizeResponse({ requestId: r.request_id, responseId, requesterId: userId, instructorId });
+    const { error } = await finalizeResponse({ requestId: r.request_id, responseId, instructorId });
     setBusy(false);
     if (error) return showToast(`エラー：${error.message}`);
     showToast("依頼を確定しました。連絡先が開示されます。");

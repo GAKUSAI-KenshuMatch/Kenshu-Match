@@ -53,9 +53,9 @@ export default function LoginPage() {
 
   async function handleGoogleLogin() {
     setGoogleSubmitting(true);
-    // ログインの場合は role 選択が不要（既存ユーザーは users テーブルに role が登録済みのため）。
-    // OAuth 完了後は Supabase が自動的に /mypage へ戻す。
-    const { error } = await signInWithGoogle(`${window.location.origin}/mypage`);
+    // OAuth 完了後は /auth/callback が PKCE の code を交換してから /mypage へ戻す
+    // （ログインの場合は role 選択が不要：既存ユーザーは users テーブルに role が登録済み）。
+    const { error } = await signInWithGoogle(`${window.location.origin}/auth/callback`);
 
     if (error) {
       showToast(`エラー：${error.message}`);

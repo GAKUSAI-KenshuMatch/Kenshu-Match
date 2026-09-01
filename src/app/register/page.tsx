@@ -4,8 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/common/Toast";
-import { signUp, signInWithGoogle } from "@/services/auth";
-import { upsertRequesterProfile } from "@/services/profiles";
+import { signUp, signInWithGoogle } from "@/lib/auth/auth";
+import { upsertRequesterProfile } from "@/lib/requester/profile";
 import { RoleCard } from "@/components/auth/RoleCard";
 import type { UserRole } from "@/types/database";
 
@@ -119,8 +119,9 @@ export default function RegisterPage() {
   async function handleGoogleAuth() {
     setGoogleSubmitting(true);
     // 役割の選択は Google 認証の「後」に /complete-profile で行う
-    // （AuthContext が public.users に行が無いことを検知して自動的にそちらへ誘導する）。
-    const { error } = await signInWithGoogle(`${window.location.origin}/mypage`);
+    // （/auth/callback が PKCE の code を交換し、AuthContext が public.users に
+    // 行が無いことを検知して自動的にそちらへ誘導する）。
+    const { error } = await signInWithGoogle(`${window.location.origin}/auth/callback`);
 
     if (error) {
       showToast(`エラー：${friendlyErrorMessage(error)}`);

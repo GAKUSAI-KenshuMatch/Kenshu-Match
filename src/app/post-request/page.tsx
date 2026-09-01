@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/common/Toast";
 import { useRoleTheme } from "@/hooks/useRoleTheme";
-import { getTrainingSubcategoryOptions, findOrCreateSubcategory, getOtherCategory } from "@/services/instructors";
-import { createTrainingRequest } from "@/services/requests";
+import { getTrainingSubcategoryOptions, findOrCreateSubcategory, getOtherCategory } from "@/lib/instructor/expertise";
+import { createTrainingRequest } from "@/lib/requests/training-requests";
 import type { RequestFormat } from "@/types/database";
 
 interface SubcategoryOption {

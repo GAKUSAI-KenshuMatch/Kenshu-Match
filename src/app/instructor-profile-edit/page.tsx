@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/common/Toast";
+import { getInstructorProfile, upsertInstructorProfile } from "@/lib/instructor/profile";
 import {
-  getInstructorProfile,
-  upsertInstructorProfile,
   getInstructorExpertiseIds,
   replaceInstructorExpertise,
-} from "@/services/profiles";
-import { getTrainingCategoriesWithSubcategories, findOrCreateSubcategory } from "@/services/instructors";
+  getTrainingCategoriesWithSubcategories,
+  findOrCreateSubcategory,
+} from "@/lib/instructor/expertise";
 import type { WorkStyle } from "@/types/database";
 
 const JP_PREFECTURES = [

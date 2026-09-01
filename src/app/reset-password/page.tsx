@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase/client";
-import { updatePassword, signOut } from "@/services/auth";
+import { createClient } from "@/lib/supabase/client";
+import { updatePassword, signOut } from "@/lib/auth/auth";
 import { useToast } from "@/components/common/Toast";
 
 const EyeIcon = () => (
@@ -53,6 +53,7 @@ export default function ResetPasswordPage() {
       );
     }
 
+    const supabase = createClient();
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {

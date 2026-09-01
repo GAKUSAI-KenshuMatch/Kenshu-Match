@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import type { CurrentUser } from "@/services/auth";
+import type { CurrentUser } from "@/lib/auth/auth";
 
 const ROLE_LABELS: Record<string, string> = {
   INSTRUCTOR: "講師",

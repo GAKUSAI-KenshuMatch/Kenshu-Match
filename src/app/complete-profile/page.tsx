@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/common/Toast";
-import { supabase } from "@/lib/supabase/client";
-import { completeOAuthProfile } from "@/services/auth";
+import { createClient } from "@/lib/supabase/client";
+import { completeOAuthProfile } from "@/lib/auth/auth";
 import { RoleCard } from "@/components/auth/RoleCard";
 import type { UserRole } from "@/types/database";
 
@@ -23,6 +23,7 @@ export default function CompleteProfilePage() {
 
   useEffect(() => {
     if (!authReady) return;
+    const supabase = createClient();
 
     // すでにプロフィールが完成している（＝直接URLを叩いてこのページに来た）場合はマイページへ
     if (!needsProfileCompletion && user) {
