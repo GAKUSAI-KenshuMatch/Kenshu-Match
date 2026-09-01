@@ -25,7 +25,16 @@ export function InstructorCard({ instructor: ins, maxTags }: InstructorCardProps
     <Link href={`/instructor-detail?id=${ins.id}`} style={{ display: "block" }}>
       <article className="instructor-card">
         <div className="instructor-card__top">
-          <span className="instructor-card__avatar">{initial(ins.name)}</span>
+          {ins.avatar_url ? (
+            <img
+              src={ins.avatar_url}
+              alt={`${ins.name || "講師"}のプロフィール画像`}
+              className="instructor-card__avatar"
+              style={{ objectFit: "cover" }}
+            />
+          ) : (
+            <span className="instructor-card__avatar">{initial(ins.name)}</span>
+          )}
           <div>
             <div className="instructor-card__name">{ins.name || "（名前未設定）"}</div>
             <div className="instructor-card__area">
@@ -44,7 +53,11 @@ export function InstructorCard({ instructor: ins, maxTags }: InstructorCardProps
               {f}
             </span>
           ))}
-          {ins.certifications ? <span className="instructor-card__tag">{ins.certifications}</span> : null}
+          {(ins.certifications || []).map((c) => (
+            <span key={c} className="instructor-card__tag">
+              {c}
+            </span>
+          ))}
         </div>
         <div className="instructor-card__bottom">
           <div className="instructor-card__rate">
