@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { getInstructorDirectory, getTrainingCategoriesWithSubcategories } from "@/services/instructors";
+import { getInstructorDirectory } from "@/lib/instructor/profile";
+import { getTrainingCategoriesWithSubcategories } from "@/lib/instructor/expertise";
 import { InstructorCard } from "@/components/instructors/InstructorCard";
 import type { InstructorPublicDirectoryRow } from "@/types/database";
 import "./instructors.css";

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/common/Toast";
 import { useRoleTheme } from "@/hooks/useRoleTheme";
-import { getRequesterProfile, upsertRequesterProfile } from "@/services/profiles";
+import { getRequesterProfile, upsertRequesterProfile } from "@/lib/requester/profile";
 
 export default function RequesterProfileEditPage() {
   const { authReady, user } = useAuth();

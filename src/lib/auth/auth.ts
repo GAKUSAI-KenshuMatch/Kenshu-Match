@@ -1,14 +1,16 @@
-import { supabase } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/client";
 import type { Session } from "@supabase/supabase-js";
 import type { UserRole, UserRow } from "@/types/database";
 
 export async function signIn(email: string, password: string) {
+  const supabase = createClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { error };
   return { data };
 }
 
 export async function signUp(email: string, password: string, role: UserRole, name: string) {
+  const supabase = createClient();
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -19,10 +21,12 @@ export async function signUp(email: string, password: string, role: UserRole, na
 }
 
 export async function signOut() {
+  const supabase = createClient();
   await supabase.auth.signOut();
 }
 
 export async function signInWithGoogle(redirectTo: string) {
+  const supabase = createClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo },
@@ -32,16 +36,19 @@ export async function signInWithGoogle(redirectTo: string) {
 }
 
 export async function resetPasswordForEmail(email: string, redirectTo: string) {
+  const supabase = createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   return { error };
 }
 
 export async function updatePassword(password: string) {
+  const supabase = createClient();
   const { error } = await supabase.auth.updateUser({ password });
   return { error };
 }
 
 export async function completeOAuthProfile(role: UserRole, name: string) {
+  const supabase = createClient();
   const { error } = await supabase.rpc("complete_oauth_profile", { p_role: role, p_name: name });
   return { error };
 }
@@ -61,6 +68,7 @@ export async function loadUserProfile(
     return { user: null, needsProfileCompletion: false };
   }
 
+  const supabase = createClient();
   const { data, error } = await supabase
     .from("users")
     .select("id, role, name, status")

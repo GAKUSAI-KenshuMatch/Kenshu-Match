@@ -4,13 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { useRoleTheme } from "@/hooks/useRoleTheme";
-import {
-  getOpenRequestsPublicPreview,
-  getOpenRequestsForInstructor,
-  getMyMatchingProfile,
-  markResultsSeenByInstructor,
-} from "@/services/requests";
-import { getRequesterContacts } from "@/services/profiles";
+import { getOpenRequestsPublicPreview, getOpenRequestsForInstructor } from "@/lib/requests/training-requests";
+import { markResultsSeenByInstructor } from "@/lib/requests/instructor-responses";
+import { getMyMatchingProfile } from "@/lib/instructor/profile";
+import { getRequesterContacts } from "@/lib/requester/profile";
 import type { OpenRequestPublicPreviewRow, TrainingRequestRow, InstructorResponseRow, TrainingReviewRow } from "@/types/database";
 
 const FORMAT_LABEL: Record<string, string> = { online: "オンライン", offline: "対面", both: "オンライン・対面" };

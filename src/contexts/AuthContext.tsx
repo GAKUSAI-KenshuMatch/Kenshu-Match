@@ -3,8 +3,8 @@
 import { createContext, useCallback, useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase/client";
-import { loadUserProfile, signIn, signInWithGoogle, signOut, type CurrentUser } from "@/services/auth";
+import { createClient } from "@/lib/supabase/client";
+import { loadUserProfile, signIn, signInWithGoogle, signOut, type CurrentUser } from "@/lib/auth/auth";
 
 export interface AuthContextValue {
   session: Session | null;
@@ -35,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // token), so it alone is the reliable source of truth. Calling
     // getSession() separately on mount can race that resolution and read an
     // empty session right after an OAuth redirect (see legacy assets/auth.js).
+    const supabase = createClient();
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshProfile = useCallback(async () => {
+    const supabase = createClient();
     const { data } = await supabase.auth.getSession();
     setSession(data.session);
     const { user: profile, needsProfileCompletion: incomplete } = await loadUserProfile(data.session);

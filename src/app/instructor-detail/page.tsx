@@ -6,8 +6,10 @@ import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/components/common/Toast";
 import { useRoleTheme } from "@/hooks/useRoleTheme";
-import { getInstructorById, getInstructorReviews, getTrainingSubcategoryOptions } from "@/services/instructors";
-import { createTrainingRequest } from "@/services/requests";
+import { getInstructorById } from "@/lib/instructor/profile";
+import { getTrainingSubcategoryOptions } from "@/lib/instructor/expertise";
+import { getInstructorReviews } from "@/lib/requests/reviews";
+import { createTrainingRequest } from "@/lib/requests/training-requests";
 import { MOCK_INSTRUCTORS, INSTRUCTOR_DETAILS, MOCK_REVIEWS } from "@/lib/mockInstructors";
 import type { InstructorPublicDirectoryRow, RequestFormat, WorkStyle } from "@/types/database";
 

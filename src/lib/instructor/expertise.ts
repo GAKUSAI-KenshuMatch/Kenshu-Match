@@ -1,5 +1,4 @@
-import { supabase } from "@/lib/supabase/client";
-import type { InstructorPublicDirectoryRow } from "@/types/database";
+import { createClient } from "@/lib/supabase/client";
 
 export interface CategoryWithSubcategories {
   id?: string;
@@ -10,6 +9,7 @@ export interface CategoryWithSubcategories {
 
 /** Full taxonomy (used by instructor filters, request forms, profile-edit expertise picker). */
 export async function getTrainingCategoriesWithSubcategories() {
+  const supabase = createClient();
   return supabase
     .from("training_categories")
     .select("id, name, sort_order, training_subcategories(id, name)")
@@ -18,62 +18,16 @@ export async function getTrainingCategoriesWithSubcategories() {
 
 /** Lightweight taxonomy for <select> options (id + category name / subcategory name). */
 export async function getTrainingSubcategoryOptions() {
+  const supabase = createClient();
   return supabase
     .from("training_subcategories")
     .select("id, name, category_id, training_categories(name)")
     .order("name");
 }
 
-export async function getInstructorDirectory() {
-  return supabase.from("instructor_public_directory").select("*").order("rating_avg", { ascending: false });
-}
-
-export async function getFeaturedInstructors(limit = 6) {
-  return supabase
-    .from("instructor_public_directory")
-    .select("*")
-    .eq("is_featured", true)
-    .order("rating_avg", { ascending: false })
-    .limit(limit);
-}
-
-export async function getInstructorById(id: string) {
-  return supabase.from("instructor_public_directory").select("*").eq("id", id).maybeSingle();
-}
-
-export async function getInstructorReviews(instructorId: string) {
-  return supabase
-    .from("training_reviews")
-    .select("rating, comment, created_at")
-    .eq("instructor_id", instructorId)
-    .order("created_at", { ascending: false });
-}
-
-export async function getMatchingCandidateInstructors() {
-  return supabase
-    .from("instructor_public_directory")
-    .select("id, name, work_style, desired_rate_min, rating_avg, prefectures, self_pr");
-}
-
-export async function getInstructorNames(ids: string[]) {
-  const map: Record<string, Pick<InstructorPublicDirectoryRow, "id" | "name">> = {};
-  if (!ids.length) return map;
-  const { data, error } = await supabase.from("instructor_public_directory").select("id, name").in("id", ids);
-  if (error) {
-    console.error("instructor_public_directory query error:", error);
-  }
-  data?.forEach((i) => {
-    map[i.id] = i;
-  });
-  return map;
-}
-
-export async function getInstructorExpertiseInstructorIds(subcategoryId: string) {
-  const { data } = await supabase
-    .from("instructor_expertise")
-    .select("instructor_id")
-    .eq("subcategory_id", subcategoryId);
-  return new Set((data || []).map((x) => x.instructor_id));
+export async function getOtherCategory() {
+  const supabase = createClient();
+  return supabase.from("training_categories").select("id, name").eq("name", "その他").maybeSingle();
 }
 
 /**
@@ -83,6 +37,7 @@ export async function getInstructorExpertiseInstructorIds(subcategoryId: string)
  * (under whichever category the user is browsing).
  */
 export async function findOrCreateSubcategory(categoryId: string, name: string) {
+  const supabase = createClient();
   const { data: existing, error: findError } = await supabase
     .from("training_subcategories")
     .select("id, name")
@@ -112,6 +67,41 @@ export async function findOrCreateSubcategory(categoryId: string, name: string) 
   return { data: created };
 }
 
-export async function getOtherCategory() {
-  return supabase.from("training_categories").select("id, name").eq("name", "その他").maybeSingle();
+export async function getInstructorExpertiseInstructorIds(subcategoryId: string) {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("instructor_expertise")
+    .select("instructor_id")
+    .eq("subcategory_id", subcategoryId);
+  return new Set((data || []).map((x) => x.instructor_id));
+}
+
+export async function getInstructorExpertiseIds(instructorId: string) {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("instructor_expertise")
+    .select("subcategory_id")
+    .eq("instructor_id", instructorId);
+  return (data || []).map((r) => r.subcategory_id);
+}
+
+/**
+ * Replaces an instructor's expertise rows: delete-all then re-insert the
+ * selected subcategory ids. Mirrors instructor-profile-edit.html exactly
+ * (simple and reliable, per its own comment).
+ */
+export async function replaceInstructorExpertise(instructorId: string, subcategoryIds: string[]) {
+  const supabase = createClient();
+  const { error: deleteError } = await supabase
+    .from("instructor_expertise")
+    .delete()
+    .eq("instructor_id", instructorId);
+  if (deleteError) return { error: deleteError };
+
+  if (subcategoryIds.length) {
+    const rows = subcategoryIds.map((subcategory_id) => ({ instructor_id: instructorId, subcategory_id }));
+    const { error: insertError } = await supabase.from("instructor_expertise").insert(rows);
+    if (insertError) return { error: insertError };
+  }
+  return { error: null };
 }

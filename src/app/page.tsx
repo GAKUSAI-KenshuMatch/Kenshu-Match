@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/supabase/client";
-import { getFeaturedInstructors } from "@/services/instructors";
+import { createClient } from "@/lib/supabase/client";
+import { getFeaturedInstructors } from "@/lib/instructor/profile";
 import { InstructorCard } from "@/components/instructors/InstructorCard";
 import type { InstructorPublicDirectoryRow, TrainingCategoryRow } from "@/types/database";
 import "./home.css";
@@ -39,6 +39,7 @@ export default function Home() {
 
   useEffect(() => {
     (async () => {
+      const supabase = createClient();
       const { data, error } = await supabase
         .from("training_categories")
         .select("name, sort_order, training_subcategories(id)")
