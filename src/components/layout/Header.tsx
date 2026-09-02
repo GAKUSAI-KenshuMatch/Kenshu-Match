@@ -31,6 +31,13 @@ function getNavLinks(user: CurrentUser | null) {
     ];
   }
 
+  if (user.role === "ADMIN") {
+    return [
+      { href: "/", label: "トップ" },
+      { href: "/admin", label: "管理者ダッシュボード" },
+    ];
+  }
+
   return [
     { href: "/", label: "トップ" },
     { href: "/instructors", label: "講師を探す" },
@@ -87,7 +94,7 @@ export function Header() {
             </>
           ) : (
             <>
-              <Link className="header-user" href="/mypage">
+              <Link className="header-user" href={user.role === "ADMIN" ? "/admin" : "/mypage"}>
                 <span className="hanko hanko--role" aria-hidden="true" style={{ width: 26, height: 26, fontSize: 12 }}>
                   {(ROLE_LABELS[user.role] || "").slice(0, 1)}
                 </span>

@@ -8,14 +8,16 @@ import { getSupabaseEnv } from "./env";
  * prefix. `roles: undefined` means "any authenticated user" — used for
  * /mypage, which renders an INSTRUCTOR view or a COMPANY/INDIVIDUAL
  * (requester) view internally based on the signed-in user's role, rather
- * than being gated to one role. No ADMIN entries: this project's refactor
- * scope excludes the ADMIN role entirely.
+ * than being gated to one role. /admin is gated to ADMIN only — Kenshu-Match's
+ * own lightweight admin area (kept separate from engineer-match-platform's
+ * admin panel, 2026-09-02 decision).
  */
 const PROTECTED_PREFIXES: ReadonlyArray<{ prefix: string; roles?: UserRole[] }> = [
   { prefix: "/mypage" },
   { prefix: "/instructor-profile-edit", roles: ["INSTRUCTOR"] },
   { prefix: "/requester-profile-edit", roles: ["COMPANY", "INDIVIDUAL"] },
   { prefix: "/post-request", roles: ["COMPANY", "INDIVIDUAL"] },
+  { prefix: "/admin", roles: ["ADMIN"] },
 ];
 
 function getRequiredRoles(pathname: string): UserRole[] | "any" | null {
@@ -26,8 +28,9 @@ function getRequiredRoles(pathname: string): UserRole[] | "any" | null {
   return match.roles ?? "any";
 }
 
-/** /mypage renders both the instructor and requester dashboard views; there's nowhere else to send a mismatched role. */
+/** /mypage renders both the instructor and requester dashboard views; there's nowhere else to send a mismatched role. ADMIN goes back to its own /admin area. */
 function getDashboardPathForRole(role: UserRole): string {
+  if (role === "ADMIN") return "/admin";
   return role === "INSTRUCTOR" || role === "COMPANY" || role === "INDIVIDUAL" ? "/mypage" : "/login";
 }
 

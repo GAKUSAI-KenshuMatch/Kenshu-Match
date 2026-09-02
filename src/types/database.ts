@@ -218,6 +218,21 @@ export type Database = {
         Args: { p_role: UserRole; p_name: string };
         Returns: void;
       };
+      /**
+       * Shared with engineer-match-platform (same DB function, not defined
+       * in this repo's migrations) — the only writer for admin_audit_logs.
+       */
+      admin_write_audit_log: {
+        Args: {
+          p_action_type: string;
+          p_target_type: string;
+          p_target_id: string;
+          p_before_data?: unknown | null;
+          p_after_data?: unknown | null;
+          p_reason?: string | null;
+        };
+        Returns: void;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
