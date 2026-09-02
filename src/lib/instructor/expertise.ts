@@ -38,6 +38,7 @@ export async function getOtherCategory() {
  */
 export async function findOrCreateSubcategory(categoryId: string, name: string) {
   const supabase = createClient();
+  const { data: userData } = await supabase.auth.getUser();
   const { data: existing, error: findError } = await supabase
     .from("training_subcategories")
     .select("id, name")
@@ -59,7 +60,7 @@ export async function findOrCreateSubcategory(categoryId: string, name: string) 
 
   const { data: created, error: createError } = await supabase
     .from("training_subcategories")
-    .insert({ category_id: categoryId, name, sort_order: nextSortOrder })
+    .insert({ category_id: categoryId, name, sort_order: nextSortOrder, created_by: userData.user?.id ?? null })
     .select("id, name")
     .single();
 
