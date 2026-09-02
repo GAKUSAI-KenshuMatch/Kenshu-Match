@@ -95,11 +95,18 @@ export default function PostRequestPage() {
     const titleInvalid = !title.trim();
     const descriptionInvalid = !description.trim();
     const locationInvalid = format !== "online" && !location.trim();
+    const expertiseInvalid = !expertise;
     setTitleHasError(titleInvalid);
     setDescriptionHasError(descriptionInvalid);
 
-    if (titleInvalid || descriptionInvalid || locationInvalid) {
-      setFormError(locationInvalid ? "対面の場合は実施場所の入力が必要です。" : "入力内容をご確認ください。");
+    if (titleInvalid || descriptionInvalid || locationInvalid || expertiseInvalid) {
+      setFormError(
+        locationInvalid
+          ? "対面の場合は実施場所の入力が必要です。"
+          : expertiseInvalid
+            ? "分野を選択してください。"
+            : "入力内容をご確認ください。"
+      );
       return;
     }
     setFormError("");
@@ -110,7 +117,7 @@ export default function PostRequestPage() {
       requester_type: user.role === "COMPANY" ? "company" : "individual",
       title: title.trim(),
       description: description.trim(),
-      expertise_field: expertise || null,
+      expertise_field: expertise,
       budget: Number(budget) || null,
       participant_count: Number(participants) || null,
       preferred_format: format,

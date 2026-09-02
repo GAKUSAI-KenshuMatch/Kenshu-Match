@@ -6,7 +6,7 @@ export interface NewTrainingRequestInput {
   requester_type: RequesterType;
   title: string;
   description: string;
-  expertise_field: string | null;
+  expertise_field: string;
   budget: number | null;
   participant_count: number | null;
   preferred_format: RequestFormat;

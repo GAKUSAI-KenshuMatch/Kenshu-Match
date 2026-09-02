@@ -1,9 +1,11 @@
 /**
- * Hand-written Supabase types, derived from actual usage in the legacy
- * assets/*.js and *.html files (queries, inserts, updates, selects).
- * No column here is invented — anything not observed in the legacy code is
- * left out. If the real schema has more columns/tables, extend this file
- * rather than guessing further.
+ * Hand-written Supabase types, kept in sync with the live schema captured in
+ * supabase/migrations/083_kenshu_match_baseline.sql. Synced 2026-09-02 to
+ * add columns that exist live but were missing here (see that migration's
+ * header comment for the discrepancies this fixes: rating_avg, is_featured,
+ * training_subcategories.description, instructor_responses.reveal_contact/
+ * created_at, training_requests.expertise_field nullability, plus several
+ * other missing created_at/updated_at columns found during the same pass).
  *
  * NOTE: every row shape below is a `type` alias, not an `interface`.
  * @supabase/postgrest-js structurally checks each Row/Insert/Update against
@@ -42,11 +44,14 @@ export type RequesterProfileRow = {
   notes: string | null;
   department: string | null;
   position: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type InstructorProfileRow = {
   id: string;
   is_public: boolean;
+  is_featured: boolean;
   prefectures: string[] | null;
   years_of_experience: number | null;
   self_pr: string | null;
@@ -58,24 +63,31 @@ export type InstructorProfileRow = {
   avatar_url: string | null;
   contact_email: string | null;
   contact_phone: string | null;
+  rating_avg: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type InstructorExpertiseRow = {
   instructor_id: string;
   subcategory_id: string;
+  created_at: string;
 };
 
 export type TrainingCategoryRow = {
   id: string;
   name: string;
   sort_order: number;
+  created_at: string;
 };
 
 export type TrainingSubcategoryRow = {
   id: string;
   category_id: string;
   name: string;
+  description: string | null;
   sort_order: number;
+  created_at: string;
 };
 
 export type TrainingRequestRow = {
@@ -84,7 +96,7 @@ export type TrainingRequestRow = {
   requester_type: RequesterType;
   title: string;
   description: string;
-  expertise_field: string | null;
+  expertise_field: string;
   budget: number | null;
   participant_count: number | null;
   preferred_format: RequestFormat;
@@ -104,7 +116,9 @@ export type InstructorResponseRow = {
   action: ResponseAction;
   quote_price: number | null;
   message: string | null;
+  reveal_contact: boolean;
   is_selected: boolean;
+  created_at: string;
   result_seen_at: string | null;
   requester_seen_at: string | null;
 };
@@ -122,10 +136,12 @@ export type TrainingReviewRow = {
 };
 
 export type ContactUnlockRow = {
+  unlock_id: string;
   request_id: string;
   response_id: string;
   requester_id: string;
   instructor_id: string;
+  unlocked_at: string;
 };
 
 /** VIEW: public directory of instructor profiles (no contact_email/contact_phone). */
@@ -145,6 +161,7 @@ export type InstructorPublicDirectoryRow = {
   avatar_url: string | null;
   years_of_experience: number | null;
   is_featured: boolean | null;
+  created_at: string;
 };
 
 /** VIEW: public preview of broadcast (target_instructor_id IS NULL) requests. */
@@ -153,11 +170,13 @@ export type OpenRequestPublicPreviewRow = {
   title: string;
   description: string;
   requester_type: RequesterType;
+  expertise_field: string;
   created_at: string;
   preferred_format: RequestFormat;
   budget: number | null;
   location: string | null;
   preferred_schedule: string | null;
+  participant_count: number | null;
 };
 
 // @supabase/postgrest-js's GenericTable/GenericView require a Relationships

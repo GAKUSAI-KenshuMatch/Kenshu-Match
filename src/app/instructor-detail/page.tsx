@@ -187,11 +187,18 @@ function InstructorDetailInner() {
     const titleInvalid = !reqTitle.trim();
     const descInvalid = !reqDescription.trim();
     const locationInvalid = reqFormat !== "online" && !reqLocation.trim();
+    const expertiseInvalid = !reqExpertise;
     setReqTitleError(titleInvalid);
     setReqDescError(descInvalid);
 
-    if (titleInvalid || descInvalid || locationInvalid) {
-      setReqFormError(locationInvalid ? "対面の場合は実施場所の入力が必要です。" : "入力内容をご確認ください。");
+    if (titleInvalid || descInvalid || locationInvalid || expertiseInvalid) {
+      setReqFormError(
+        locationInvalid
+          ? "対面の場合は実施場所の入力が必要です。"
+          : expertiseInvalid
+            ? "分野を選択してください。"
+            : "入力内容をご確認ください。"
+      );
       return;
     }
     setReqFormError("");
@@ -203,7 +210,7 @@ function InstructorDetailInner() {
       requester_type: user.role === "COMPANY" ? "company" : "individual",
       title: reqTitle.trim(),
       description: reqDescription.trim(),
-      expertise_field: reqExpertise || null,
+      expertise_field: reqExpertise,
       budget: Number(reqBudget) || null,
       participant_count: Number(reqParticipants) || null,
       preferred_format: reqFormat,
