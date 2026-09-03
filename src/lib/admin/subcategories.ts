@@ -88,8 +88,21 @@ export async function renameSubcategory(row: AdminSubcategoryRow, newName: strin
   if (!trimmed || trimmed === row.name) return { error: null };
 
   const supabase = createClient();
-  const { error } = await supabase.from("training_subcategories").update({ name: trimmed }).eq("id", row.id);
+  // .select("id") is required here, not cosmetic: without it, an UPDATE
+  // that RLS silently filters out (0 rows matched — e.g. the admin RLS
+  // policy isn't applied yet, or this user isn't actually ADMIN at the DB
+  // level) returns error: null with no indication nothing changed. Forcing
+  // a returned row lets us detect that case explicitly below instead of
+  // reporting a false success.
+  const { data, error } = await supabase
+    .from("training_subcategories")
+    .update({ name: trimmed })
+    .eq("id", row.id)
+    .select("id");
   if (error) return { error };
+  if (!data || data.length === 0) {
+    return { error: { message: "更新対象が見つかりませんでした（権限設定が反映されていない可能性があります）" } };
+  }
 
   await writeAdminAuditLog({
     actionType: "subcategory_rename",
@@ -111,8 +124,13 @@ export async function renameSubcategory(row: AdminSubcategoryRow, newName: strin
  */
 export async function deleteSubcategory(row: AdminSubcategoryRow) {
   const supabase = createClient();
-  const { error } = await supabase.from("training_subcategories").delete().eq("id", row.id);
+  // Same reasoning as renameSubcategory: .select("id") forces a real
+  // affected-rows signal instead of a silent RLS no-op reading as success.
+  const { data, error } = await supabase.from("training_subcategories").delete().eq("id", row.id).select("id");
   if (error) return { error };
+  if (!data || data.length === 0) {
+    return { error: { message: "削除対象が見つかりませんでした（権限設定が反映されていない可能性があります）" } };
+  }
 
   await writeAdminAuditLog({
     actionType: "subcategory_delete",

@@ -21,3 +21,6 @@ Thumbs.db
 # Editor
 .vscode/*
 !.vscode/extensions.json
+# Supabase CLI local state (contains pooler connection string — never commit)
+supabase/.temp/
+supabase/.branches/
